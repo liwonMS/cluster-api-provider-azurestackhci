@@ -15,11 +15,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1beta1
+package v1beta2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
 const (
@@ -55,10 +55,6 @@ type AzureStackHCIClusterSpec struct {
 type AzureStackHCIClusterStatus struct {
 	Bastion VM `json:"bastion,omitempty"`
 
-	// Ready is true when the provider resource is ready.
-	// +optional
-	Ready bool `json:"ready"`
-
 	// Phase represents the current phase of cluster actuation.
 	// E.g. Pending, Running, Terminating, Failed etc.
 	// +optional
@@ -66,7 +62,14 @@ type AzureStackHCIClusterStatus struct {
 
 	// Conditions defines current service state of the AzureStackHCICluster.
 	// +optional
-	Conditions clusterv1.Conditions `json:"conditions,omitempty"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// Initialization provides observations of the Cluster initialization process.
+	// NOTE: fields in this struct are part of the Cluster API contract and are used to orchestrate initial Cluster provisioning.
+	// The value of those fields is never updated after provisioning is completed.
+	// Use conditions to monitor the operational state of the Cluster's BootstrapSecret.
+	// +optional
+	Initialization *clusterv1.ClusterInitializationStatus `json:"initialization,omitempty"`
 }
 
 // SetTypedPhase sets the Phase field to the string representation of AzureStackHCIClusterPhase.
@@ -106,12 +109,12 @@ type AzureStackHCICluster struct {
 }
 
 // GetConditions returns the list of conditions for AzureStackHCICluster.
-func (c *AzureStackHCICluster) GetConditions() clusterv1.Conditions {
+func (c *AzureStackHCICluster) GetConditions() []metav1.Condition {
 	return c.Status.Conditions
 }
 
 // SetConditions sets the conditions for AzureStackHCICluster.
-func (c *AzureStackHCICluster) SetConditions(conditions clusterv1.Conditions) {
+func (c *AzureStackHCICluster) SetConditions(conditions []metav1.Condition) {
 	c.Status.Conditions = conditions
 }
 

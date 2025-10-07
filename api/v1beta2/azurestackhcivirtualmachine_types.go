@@ -15,12 +15,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1beta1
+package v1beta2
 
 import (
 	v1core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	"sigs.k8s.io/cluster-api/errors"
 )
 
@@ -86,7 +85,7 @@ type AzureStackHCIVirtualMachineStatus struct {
 
 	// Conditions defines current service state of the AzureStackHCIVirtualMachine.
 	// +optional
-	Conditions clusterv1.Conditions `json:"conditions,omitempty"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -104,12 +103,12 @@ type AzureStackHCIVirtualMachine struct {
 }
 
 // GetConditions returns the list of conditions for the AzureStackHCIVirtualMachine.
-func (m *AzureStackHCIVirtualMachine) GetConditions() clusterv1.Conditions {
+func (m *AzureStackHCIVirtualMachine) GetConditions() []metav1.Condition {
 	return m.Status.Conditions
 }
 
 // SetConditions sets the conditions for the AzureStackHCIVirtualMachine.
-func (m *AzureStackHCIVirtualMachine) SetConditions(conditions clusterv1.Conditions) {
+func (m *AzureStackHCIVirtualMachine) SetConditions(conditions []metav1.Condition) {
 	m.Status.Conditions = conditions
 }
 

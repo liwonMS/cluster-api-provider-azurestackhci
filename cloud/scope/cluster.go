@@ -23,7 +23,7 @@ import (
 	"os"
 
 	"github.com/go-logr/logr"
-	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta1"
+	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta2"
 	azhciauth "github.com/microsoft/cluster-api-provider-azurestackhci/pkg/auth"
 	"github.com/microsoft/moc/pkg/auth"
 	"github.com/microsoft/moc/pkg/diagnostics"
@@ -31,7 +31,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2/klogr"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -176,18 +176,15 @@ func (s *ClusterScope) ListOptionsLabelSelector() client.ListOption {
 
 // PatchObject persists the cluster configuration and status.
 func (s *ClusterScope) PatchObject() error {
-	conditions.SetSummary(s.AzureStackHCICluster,
-		conditions.WithConditions(
-			infrav1.NetworkInfrastructureReadyCondition,
-		),
-		conditions.WithStepCounterIfOnly(
-			infrav1.NetworkInfrastructureReadyCondition,
-		),
-	)
+	newCondition, err := conditions.NewSummaryCondition(s.AzureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, conditions.ForConditionTypes{infrav1.NetworkInfrastructureReadyCondition})
+	if err != nil {
+		return fmt.Errorf("unable to generate summary condition: %e", err)
+	}
+	conditions.Set(s.AzureStackHCICluster, *newCondition)
 
 	return s.patchHelper.Patch(s.Context,
 		s.AzureStackHCICluster,
-		patch.WithOwnedConditions{Conditions: []clusterv1.ConditionType{
+		patch.WithOwnedConditions{Conditions: []string{
 			clusterv1.ReadyCondition,
 			infrav1.NetworkInfrastructureReadyCondition,
 		}})
@@ -200,10 +197,7 @@ func (s *ClusterScope) Close() error {
 
 // APIServerPort returns the APIServerPort to use when creating the load balancer.
 func (s *ClusterScope) APIServerPort() int32 {
-	if s.Cluster.Spec.ClusterNetwork != nil && s.Cluster.Spec.ClusterNetwork.APIServerPort != nil {
-		return *s.Cluster.Spec.ClusterNetwork.APIServerPort
-	}
-	return 6443
+	return s.Cluster.Spec.ClusterNetwork.APIServerPort
 }
 
 func (s *ClusterScope) AzureStackHCILoadBalancer() *infrav1.AzureStackHCILoadBalancerSpec {

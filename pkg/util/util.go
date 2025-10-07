@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta1"
+	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta2"
 	"github.com/pkg/errors"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,7 +18,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/utils/pointer"
 
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	capiutil "sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/kubeconfig"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -91,7 +91,7 @@ func GetNodeName(ctx context.Context, client client.Client, obj metav1.ObjectMet
 	if machine == nil {
 		return "", errors.Errorf("resource %s.%s has no owning machine", obj.Namespace, obj.Name)
 	}
-	if machine.Status.NodeRef == nil {
+	if machine.Status.NodeRef.Name == "" {
 		return "", errors.Errorf("machine %s.%s has no node ref", machine.Namespace, machine.Name)
 	}
 	return machine.Status.NodeRef.Name, nil

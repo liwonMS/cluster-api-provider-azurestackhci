@@ -15,15 +15,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1beta1
-
-import clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+package v1beta2
 
 // Conditions and condition Reasons for the AzureStackHCIVirtualMachine object
 
 const (
 	// VMRunningCondition reports on current status of the AzureStackHCIVirtualMachine.
-	VMRunningCondition clusterv1.ConditionType = "VMRunning"
+	VMRunningCondition = "VMRunning"
 	// VMUpdatingReason used when the vm updating is in progress.
 	VMUpdatingReason = "VMUpdating"
 	// VMProvisionFailedReason used for failures during vm provisioning.
@@ -46,7 +44,7 @@ const (
 
 const (
 	// NetworkInfrastructureReadyCondition reports on current status of the AzureStackHCICluster
-	NetworkInfrastructureReadyCondition clusterv1.ConditionType = "NetworkInfrastructureReady"
+	NetworkInfrastructureReadyCondition = "NetworkInfrastructureReady"
 	// ClusterReconciliationFailedReason used for failures during cluster reconciliation.
 	ClusterReconciliationFailedReason = "ClusterReconciliationFailed"
 	// LoadBalancerProvisioningReason used for provisioning of lb
@@ -61,7 +59,7 @@ const (
 
 const (
 	// LoadBalancerInfrastructureReadyCondition reports on current status of the AzureStackHCILoadBalancer
-	LoadBalancerInfrastructureReadyCondition clusterv1.ConditionType = "LoadBalancerInfrastructureReady"
+	LoadBalancerInfrastructureReadyCondition = "LoadBalancerInfrastructureReady"
 	// LoadBalancerServiceReconciliationFailedReason used for service failures during loadbalancer reconciliation.
 	LoadBalancerServiceReconciliationFailedReason = "ServiceReconciliationFailed"
 	// LoadBalancerServiceStatusFailedReason used for service status failures.
@@ -74,7 +72,7 @@ const (
 	LoadBalancerNoReplicasReadyReason = "NoReplicasReady"
 
 	// LoadBalancerReplicasReadyCondition reports on current status of the AzureStackHCILoadBalancer machine replicas
-	LoadBalancerReplicasReadyCondition clusterv1.ConditionType = "LoadBalancerReplicasReady"
+	LoadBalancerReplicasReadyCondition = "LoadBalancerReplicasReady"
 	// LoadBalancerWaitingForReplicasReadyReason used when we are waiting for replicas to be ready.
 	LoadBalancerWaitingForReplicasReadyReason = "WaitingForReplicasToBeReady"
 	// LoadBalancerReplicasScalingUpReason used when we are scaling up the replicas.

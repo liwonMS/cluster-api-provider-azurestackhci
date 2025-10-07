@@ -20,16 +20,17 @@ package scope
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 
 	"github.com/go-logr/logr"
-	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta1"
+	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta2"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2/klogr"
 	"k8s.io/utils/pointer"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	capierrors "sigs.k8s.io/cluster-api/errors"
+	"k8s.io/utils/ptr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
@@ -151,7 +152,7 @@ func (m *MachineScope) GetProviderID() string {
 
 // SetProviderID sets the AzureStackHCIMachine providerID in spec.
 func (m *MachineScope) SetProviderID(v string) {
-	m.AzureStackHCIMachine.Spec.ProviderID = pointer.StringPtr(v)
+	m.AzureStackHCIMachine.Spec.ProviderID = ptr.To(v)
 }
 
 // GetVMState returns the AzureStackHCIMachine VM state.
@@ -167,17 +168,7 @@ func (m *MachineScope) SetVMState(v *infrav1.VMState) {
 
 // SetReady sets the AzureStackHCIMachine Ready Status
 func (m *MachineScope) SetReady() {
-	m.AzureStackHCIMachine.Status.Ready = true
-}
-
-// SetFailureMessage sets the AzureStackHCIMachine status failure message.
-func (m *MachineScope) SetFailureMessage(v error) {
-	m.AzureStackHCIMachine.Status.FailureMessage = pointer.StringPtr(v.Error())
-}
-
-// SetFailureReason sets the AzureStackHCIMachine status failure reason.
-func (m *MachineScope) SetFailureReason(v capierrors.MachineStatusError) {
-	m.AzureStackHCIMachine.Status.FailureReason = &v
+	*m.AzureStackHCIMachine.Status.Initialization.InfrastructureProvisioned = true
 }
 
 // SetAnnotation sets a key value annotation on the AzureStackHCIMachine.
@@ -190,19 +181,16 @@ func (m *MachineScope) SetAnnotation(key, value string) {
 
 // PatchObject persists the machine spec and status.
 func (m *MachineScope) PatchObject() error {
-	conditions.SetSummary(m.AzureStackHCIMachine,
-		conditions.WithConditions(
-			infrav1.VMRunningCondition,
-		),
-		conditions.WithStepCounterIfOnly(
-			infrav1.VMRunningCondition,
-		),
-	)
+	summary, err := conditions.NewSummaryCondition(m.AzureStackHCIMachine, infrav1.VMRunningCondition, conditions.ForConditionTypes{infrav1.VMRunningCondition})
+	if err != nil {
+		return fmt.Errorf("unable to generate summary condition: %e", err)
+	}
+	conditions.Set(m.AzureStackHCIMachine, *summary)
 
 	return m.patchHelper.Patch(
 		context.TODO(),
 		m.AzureStackHCIMachine,
-		patch.WithOwnedConditions{Conditions: []clusterv1.ConditionType{
+		patch.WithOwnedConditions{Conditions: []string{
 			clusterv1.ReadyCondition,
 			infrav1.VMRunningCondition,
 		}})

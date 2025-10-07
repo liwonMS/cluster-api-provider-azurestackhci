@@ -23,15 +23,13 @@ import (
 	"os"
 
 	"github.com/go-logr/logr"
-	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta1"
+	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta2"
 	azhciauth "github.com/microsoft/cluster-api-provider-azurestackhci/pkg/auth"
 	"github.com/microsoft/moc/pkg/auth"
 	"github.com/microsoft/moc/pkg/diagnostics"
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2/klogr"
-	"k8s.io/utils/pointer"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	capierrors "sigs.k8s.io/cluster-api/errors"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -184,16 +182,6 @@ func (m *VirtualMachineScope) SetReady() {
 	m.AzureStackHCIVirtualMachine.Status.Ready = true
 }
 
-// SetFailureMessage sets the AzureStackHCIVirtualMachine status failure message.
-func (m *VirtualMachineScope) SetFailureMessage(v error) {
-	m.AzureStackHCIVirtualMachine.Status.FailureMessage = pointer.StringPtr(v.Error())
-}
-
-// SetFailureReason sets the AzureStackHCIVirtualMachine status failure reason.
-func (m *VirtualMachineScope) SetFailureReason(v capierrors.MachineStatusError) {
-	m.AzureStackHCIVirtualMachine.Status.FailureReason = &v
-}
-
 // SetAnnotation sets a key value annotation on the AzureStackHCIVirtualMachine.
 func (m *VirtualMachineScope) SetAnnotation(key, value string) {
 	if m.AzureStackHCIVirtualMachine.Annotations == nil {
@@ -204,18 +192,17 @@ func (m *VirtualMachineScope) SetAnnotation(key, value string) {
 
 // PatchObject persists the virtual machine spec and status.
 func (m *VirtualMachineScope) PatchObject() error {
-	conditions.SetSummary(m.AzureStackHCIVirtualMachine,
-		conditions.WithConditions(
-			infrav1.VMRunningCondition,
-		),
-		conditions.WithStepCounterIfOnly(
-			infrav1.VMRunningCondition,
-		),
-	)
+	summary, err := conditions.NewSummaryCondition(m.AzureStackHCIVirtualMachine,
+		infrav1.VMRunningCondition,
+		conditions.ForConditionTypes{infrav1.VMRunningCondition})
+	if err != nil {
+		return fmt.Errorf("unable to generate summary: %e", err)
+	}
+	conditions.Set(m.AzureStackHCIVirtualMachine, *summary)
 
 	return m.patchHelper.Patch(m.Context,
 		m.AzureStackHCIVirtualMachine,
-		patch.WithOwnedConditions{Conditions: []clusterv1.ConditionType{
+		patch.WithOwnedConditions{Conditions: []string{
 			clusterv1.ReadyCondition,
 			infrav1.VMRunningCondition,
 		}})

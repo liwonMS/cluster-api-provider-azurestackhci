@@ -15,11 +15,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1beta1
+package v1beta2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	"sigs.k8s.io/cluster-api/errors"
 )
 
@@ -73,7 +72,7 @@ type AzureStackHCILoadBalancerStatus struct {
 
 	// Conditions defines current service state of the AzureStackHCILoadBalancer.
 	// +optional
-	Conditions clusterv1.Conditions `json:"conditions,omitempty"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// ErrorReason will be set in the event that there is a terminal problem
 	// reconciling the Machine and will contain a succinct value suitable
@@ -168,12 +167,12 @@ type AzureStackHCILoadBalancer struct {
 }
 
 // GetConditions returns the list of conditions for AzureStackHCILoadBalancer.
-func (c *AzureStackHCILoadBalancer) GetConditions() clusterv1.Conditions {
+func (c *AzureStackHCILoadBalancer) GetConditions() []metav1.Condition {
 	return c.Status.Conditions
 }
 
 // SetConditions sets the conditions for AzureStackHCILoadBalancer.
-func (c *AzureStackHCILoadBalancer) SetConditions(conditions clusterv1.Conditions) {
+func (c *AzureStackHCILoadBalancer) SetConditions(conditions []metav1.Condition) {
 	c.Status.Conditions = conditions
 }
 
