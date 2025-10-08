@@ -274,14 +274,21 @@ func (r *AzureStackHCIClusterReconciler) reconcileDelete(clusterScope *scope.Clu
 	// Try to get the AzureStackHCILoadBalancer; if it still exists, requeue
 	if err := r.Client.Get(clusterScope.Context, azureStackHCILoadBalancerName, azureStackHCILoadBalancer); err == nil {
 		clusterScope.Info("Waiting for AzureStackHCILoadBalancer to be deleted", "name", azureStackHCILoadBalancerName.Name)
-		conditions.Set(azureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, infrav1.LoadBalancerDeletingReason, clusterv1.ConditionSeverityWarning, "")
+		conditions.Set(azureStackHCICluster, metav1.Condition{
+			Type:   infrav1.NetworkInfrastructureReadyCondition,
+			Status: metav1.ConditionFalse,
+			Reason: infrav1.LoadBalancerDeletingReason,
+		})
 		return reconcile.Result{RequeueAfter: 20 * time.Second}, nil
 	}
 
 	if err := newAzureStackHCIClusterReconciler(clusterScope).Delete(); err != nil {
 		wrappedErr := errors.Wrapf(err, "error deleting AzureStackHCICluster %s/%s", azureStackHCICluster.Namespace, azureStackHCICluster.Name)
 		r.Recorder.Eventf(azureStackHCICluster, corev1.EventTypeWarning, "FailureClusterDelete", wrappedErr.Error())
-		conditions.Set(azureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, clusterv1.DeletionFailedReason, clusterv1.ConditionSeverityWarning, err.Error())
+		conditions.Set(azureStackHCICluster, metav1.Condition{
+			Type:    infrav1.NetworkInfrastructureReadyCondition,
+			Reason:  "DeletionFailed",
+			Message: err.Error()})
 		return reconcile.Result{}, wrappedErr
 	}
 
@@ -375,7 +382,12 @@ func (r *AzureStackHCIClusterReconciler) reconcileAzureStackHCILoadBalancer(clus
 	}
 	if err != nil {
 		if !apierrors.IsAlreadyExists(err) {
-			conditions.Set(clusterScope.AzureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, infrav1.LoadBalancerProvisioningReason, clusterv1.ConditionSeverityWarning, err.Error())
+			conditions.Set(clusterScope.AzureStackHCICluster, metav1.Condition{
+				Type:    infrav1.NetworkInfrastructureReadyCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  infrav1.LoadBalancerProvisioningReason,
+				Message: err.Error(),
+			})
 			return false, err
 		}
 	}
@@ -383,7 +395,12 @@ func (r *AzureStackHCIClusterReconciler) reconcileAzureStackHCILoadBalancer(clus
 	// Wait for the load balancer to be fully provisioned
 	if conditions.IsFalse(azureStackHCILoadBalancer, infrav1.LoadBalancerInfrastructureReadyCondition) {
 		cond := conditions.Get(azureStackHCILoadBalancer, infrav1.LoadBalancerInfrastructureReadyCondition)
-		conditions.Set(clusterScope.AzureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, cond.Reason, cond.Severity, cond.Message)
+		conditions.Set(clusterScope.AzureStackHCICluster, metav1.Condition{
+			Type:    infrav1.NetworkInfrastructureReadyCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  cond.Reason,
+			Message: cond.Message,
+		})
 		return false, nil
 	}
 

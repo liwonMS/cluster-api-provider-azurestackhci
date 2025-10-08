@@ -32,7 +32,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -49,8 +48,13 @@ func (r *AzureStackHCILoadBalancerReconciler) reconcileVirtualMachines(lbs *scop
 	for _, vm := range loadBalancerVMs {
 		if conditions.IsFalse(vm, infrav1.VMRunningCondition) {
 			cond := conditions.Get(vm, infrav1.VMRunningCondition)
-			if cond.Severity == clusterv1.ConditionSeverityError {
-				conditions.MarkFalse(lbs.AzureStackHCILoadBalancer, infrav1.LoadBalancerReplicasReadyCondition, cond.Reason, cond.Severity, cond.Message)
+			if cond != nil && (cond.Reason != "") {
+				conditions.Set(lbs.AzureStackHCILoadBalancer, metav1.Condition{
+					Type:    infrav1.LoadBalancerReplicasReadyCondition,
+					Status:  metav1.ConditionFalse,
+					Reason:  cond.Reason,
+					Message: cond.Message,
+				})
 				return reconcile.Result{}, nil
 			}
 		}
@@ -67,7 +71,12 @@ func (r *AzureStackHCILoadBalancerReconciler) reconcileVirtualMachines(lbs *scop
 
 		// some replicas are no longer ready. Unless a scale down operation was requested we will wait for them to become ready again
 		if !r.isScaleDownRequired(lbs) {
-			conditions.MarkFalse(lbs.AzureStackHCILoadBalancer, infrav1.LoadBalancerReplicasReadyCondition, infrav1.LoadBalancerWaitingForReplicasReadyReason, clusterv1.ConditionSeverityInfo, "")
+			conditions.Set(lbs.AzureStackHCILoadBalancer, metav1.Condition{
+				Type:    infrav1.LoadBalancerReplicasReadyCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  infrav1.LoadBalancerWaitingForReplicasReadyReason,
+				Message: "",
+			})
 			return reconcile.Result{Requeue: true, RequeueAfter: time.Minute}, nil
 		}
 	}
@@ -75,7 +84,11 @@ func (r *AzureStackHCILoadBalancerReconciler) reconcileVirtualMachines(lbs *scop
 	// check if we need to scale up
 	if r.isScaleUpRequired(lbs) {
 		if !r.replicasAreUpgrading(lbs) {
-			conditions.MarkFalse(lbs.AzureStackHCILoadBalancer, infrav1.LoadBalancerReplicasReadyCondition, infrav1.LoadBalancerReplicasScalingUpReason, clusterv1.ConditionSeverityInfo, "")
+			conditions.Set(lbs.AzureStackHCILoadBalancer, metav1.Condition{
+				Type:   infrav1.LoadBalancerReplicasReadyCondition,
+				Status: metav1.ConditionFalse,
+				Reason: infrav1.LoadBalancerReplicasScalingUpReason,
+			})
 		}
 
 		err = r.scaleUpVirtualMachines(lbs, clusterScope)
@@ -89,7 +102,11 @@ func (r *AzureStackHCILoadBalancerReconciler) reconcileVirtualMachines(lbs *scop
 	// check if we need to scale down
 	if r.isScaleDownRequired(lbs) {
 		if !r.replicasAreUpgrading(lbs) {
-			conditions.MarkFalse(lbs.AzureStackHCILoadBalancer, infrav1.LoadBalancerReplicasReadyCondition, infrav1.LoadBalancerReplicasScalingDownReason, clusterv1.ConditionSeverityInfo, "")
+			conditions.Set(lbs.AzureStackHCILoadBalancer, metav1.Condition{
+				Type:   infrav1.LoadBalancerReplicasReadyCondition,
+				Status: metav1.ConditionFalse,
+				Reason: infrav1.LoadBalancerReplicasScalingDownReason,
+			})
 		}
 
 		err = r.scaleDownVirtualMachines(lbs, clusterScope, loadBalancerVMs)
@@ -102,7 +119,11 @@ func (r *AzureStackHCILoadBalancerReconciler) reconcileVirtualMachines(lbs *scop
 
 	// check if we need to upgrade
 	if r.isUpgradeRequired(lbs, loadBalancerVMs) {
-		conditions.MarkFalse(lbs.AzureStackHCILoadBalancer, infrav1.LoadBalancerReplicasReadyCondition, infrav1.LoadBalancerReplicasUpgradingReason, clusterv1.ConditionSeverityInfo, "")
+		conditions.Set(lbs.AzureStackHCILoadBalancer, metav1.Condition{
+			Type:   infrav1.LoadBalancerReplicasReadyCondition,
+			Status: metav1.ConditionFalse,
+			Reason: infrav1.LoadBalancerReplicasUpgradingReason,
+		})
 		r.Recorder.Eventf(lbs.AzureStackHCILoadBalancer, corev1.EventTypeNormal, "UpgradingLoadBalancer", "Upgrading AzureStackHCILoadBalancer %s", lbs.Name())
 
 		for lbs.GetReplicas() < lbs.GetMaxReplicas() {
@@ -116,7 +137,10 @@ func (r *AzureStackHCILoadBalancerReconciler) reconcileVirtualMachines(lbs *scop
 
 	// desired state was achieved
 	if conditions.IsFalse(lbs.AzureStackHCILoadBalancer, infrav1.LoadBalancerReplicasReadyCondition) {
-		conditions.MarkTrue(lbs.AzureStackHCILoadBalancer, infrav1.LoadBalancerReplicasReadyCondition)
+		conditions.Set(lbs.AzureStackHCILoadBalancer, metav1.Condition{
+			Type:   infrav1.LoadBalancerReplicasReadyCondition,
+			Status: metav1.ConditionTrue,
+		})
 		r.Recorder.Eventf(lbs.AzureStackHCILoadBalancer, corev1.EventTypeNormal, "LoadBalancerReplicasReady", "All replicas for AzureStackHCILoadBalancer %s are ready", lbs.Name())
 	}
 

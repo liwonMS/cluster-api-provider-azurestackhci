@@ -19,7 +19,7 @@ package converters
 
 import (
 	"github.com/Azure/go-autorest/autorest/to"
-	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta1"
+	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta2"
 	"github.com/microsoft/moc-sdk-for-go/services/compute"
 )
 

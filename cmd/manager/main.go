@@ -26,9 +26,8 @@ import (
 	"os"
 	"time"
 
-	infrav1beta1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta1"
-
 	// +kubebuilder:scaffold:imports
+	infrav1beta2 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta2"
 	"github.com/microsoft/cluster-api-provider-azurestackhci/controllers"
 	"github.com/microsoft/cluster-api-provider-azurestackhci/pkg/network"
 	"github.com/spf13/pflag"
@@ -38,7 +37,7 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
-	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/feature"
 	"sigs.k8s.io/cluster-api/util/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -60,7 +59,7 @@ func init() {
 
 	_ = clientgoscheme.AddToScheme(scheme)
 	_ = clusterv1.AddToScheme(scheme)
-	_ = infrav1beta1.AddToScheme(scheme)
+	_ = infrav1beta2.AddToScheme(scheme)
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -249,27 +248,27 @@ func main() {
 
 	// +kubebuilder:scaffold:builder
 
-	if err := (&infrav1beta1.AzureStackHCICluster{}).SetupWebhookWithManager(mgr); err != nil {
+	if err := (&infrav1beta2.AzureStackHCICluster{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "AzureStackHCICluster")
 		os.Exit(1)
 	}
 
-	if err := (&infrav1beta1.AzureStackHCIMachine{}).SetupWebhookWithManager(mgr); err != nil {
+	if err := (&infrav1beta2.AzureStackHCIMachine{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "AzureStackHCIMachine")
 		os.Exit(1)
 	}
 
-	if err := (&infrav1beta1.AzureStackHCIMachineTemplate{}).SetupWebhookWithManager(mgr); err != nil {
+	if err := (&infrav1beta2.AzureStackHCIMachineTemplate{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "AzureStackHCIMachineTemplate")
 		os.Exit(1)
 	}
 
-	if err := (&infrav1beta1.AzureStackHCIVirtualMachine{}).SetupWebhookWithManager(mgr); err != nil {
+	if err := (&infrav1beta2.AzureStackHCIVirtualMachine{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "AzureStackHCIVirtualMachine")
 		os.Exit(1)
 	}
 
-	if err := (&infrav1beta1.AzureStackHCILoadBalancer{}).SetupWebhookWithManager(mgr); err != nil {
+	if err := (&infrav1beta2.AzureStackHCILoadBalancer{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "AzureStackHCILoadBalancer")
 		os.Exit(1)
 	}

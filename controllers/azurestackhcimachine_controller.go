@@ -23,7 +23,6 @@ import (
 
 	"fmt"
 
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/go-logr/logr"
 	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta2"
 	azurestackhci "github.com/microsoft/cluster-api-provider-azurestackhci/cloud"
@@ -39,8 +38,8 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/record"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
-	capierrors "sigs.k8s.io/cluster-api/errors"
 	"sigs.k8s.io/cluster-api/util"
+	"sigs.k8s.io/cluster-api/util/conditions"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -194,7 +193,10 @@ func (r *AzureStackHCIMachineReconciler) Reconcile(ctx context.Context, req ctrl
 func (r *AzureStackHCIMachineReconciler) reconcileNormal(machineScope *scope.MachineScope, clusterScope *scope.ClusterScope) (reconcile.Result, error) {
 	machineScope.Info("Reconciling AzureStackHCIMachine")
 	// If the AzureStackHCIMachine is in an error state, return early.
-	if machineScope.AzureStackHCIMachine.Status.FailureReason != nil || machineScope.AzureStackHCIMachine.Status.FailureMessage != nil {
+	// In v1beta2, we check conditions for error states
+	vmRunningCondition := conditions.Get(machineScope.AzureStackHCIMachine, infrav1.VMRunningCondition)
+	if vmRunningCondition != nil && vmRunningCondition.Status == metav1.ConditionFalse &&
+		(vmRunningCondition.Reason != "") {
 		machineScope.Info("Error state detected, skipping reconciliation")
 		r.Recorder.Eventf(machineScope.AzureStackHCIMachine, corev1.EventTypeWarning, "ErrorStateAzureStackHCIMachine", "AzureStackHCIMachine is in an error state")
 		return reconcile.Result{}, nil
@@ -207,7 +209,7 @@ func (r *AzureStackHCIMachineReconciler) reconcileNormal(machineScope *scope.Mac
 		return reconcile.Result{}, err
 	}
 
-	if !machineScope.Cluster.Status.InfrastructureReady {
+	if machineScope.Cluster.Status.Initialization.InfrastructureProvisioned == nil || !*machineScope.Cluster.Status.Initialization.InfrastructureProvisioned {
 		machineScope.Info("Cluster infrastructure is not ready yet")
 		return reconcile.Result{}, nil
 	}
@@ -254,8 +256,12 @@ func (r *AzureStackHCIMachineReconciler) reconcileNormal(machineScope *scope.Mac
 	case infrav1.VMStateUpdating:
 		machineScope.Info("Machine VM is updating", "name", vm.Name)
 	default:
-		machineScope.SetFailureReason(capierrors.UpdateMachineError)
-		machineScope.SetFailureMessage(errors.Errorf("AzureStackHCI VM state %q is unexpected", *machineScope.GetVMState()))
+		conditions.Set(machineScope.AzureStackHCIMachine, metav1.Condition{
+			Type:    infrav1.VMRunningCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  infrav1.VMProvisionFailedReason,
+			Message: fmt.Sprintf("AzureStackHCI VM state %q is unexpected", *machineScope.GetVMState()),
+		})
 	}
 
 	return reconcile.Result{}, nil
@@ -496,5 +502,5 @@ func (r *AzureStackHCIMachineReconciler) getVMImage(scope *scope.MachineScope) (
 		return &scope.AzureStackHCIMachine.Spec.Image, nil
 	}
 
-	return azurestackhci.GetDefaultImage(scope.AzureStackHCIMachine.Spec.Image.OSType, to.String(scope.Machine.Spec.Version))
+	return azurestackhci.GetDefaultImage(scope.AzureStackHCIMachine.Spec.Image.OSType, scope.Machine.Spec.Version)
 }
