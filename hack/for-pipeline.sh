@@ -38,7 +38,7 @@ spec:
 EOF
 
 cat > config/manager/kustomization.yaml <<EOF
-apiVersion: kustomize.config.k8s.io/v1beta1
+apiVersion: kustomize.config.k8s.io/v1beta2
 kind: Kustomization
 resources:
   - manager.yaml
