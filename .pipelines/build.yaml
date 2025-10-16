@@ -68,7 +68,7 @@ jobs:
         workingDirectory: "$(System.DefaultWorkingDirectory)"
         displayName: "Check for uncommitted changes"
 
-      - script: |
+    - script: |
           set -e
           set -x
           mkdir manifest
@@ -109,8 +109,11 @@ jobs:
 
           mkdir -p out/
           cp deployment/cloud-operator.yaml out/cloud-operator.yaml
+          # Export the patch tag (TagNum) used above so the next job can skip it when annotating
+          echo "##vso[task.setvariable variable=artifact_tag;isOutput=true]$TagNum"
         workingDirectory: "$(System.DefaultWorkingDirectory)"
         displayName: "Build CAPH🚀"
+        name: BuildAndPublish
 
       - task: AzureArtifacts.manifest-generator-task.manifest-generator-task.ManifestGeneratorTask@0
         displayName: "SBOM Generation"
@@ -125,3 +128,99 @@ jobs:
 
       - publish: $(System.DefaultWorkingDirectory)/manifest
         artifact: manifest
+
+  - job: AttachEOLAnnotations
+    displayName: "Attach End-of-Life Annotations"
+    dependsOn: Build
+    variables:
+      - name: artifact_tag
+        value: $[ dependencies.Build.outputs['BuildAndPublish.artifact_tag'] ]
+    pool:
+      vmImage: "ubuntu-latest"
+    steps:
+      - checkout: self
+        displayName: "Checkout repository"
+
+      # Azure CLI task to attach lifecycle (EOL) annotations to prior tags
+      - task: AzureCLI@2
+        displayName: "Attach EOL annotations to previous tags"
+        inputs:
+          azureSubscription: mocimages-connection
+          scriptType: bash
+          scriptLocation: inlineScript
+          failOnStderr: true
+          inlineScript: |
+            set -euo pipefail
+
+            # set varaiables
+            destination_acr_name="mocimages"
+            destination_acr_domain="azurecr.io"
+            destination_acr_repo="caphcontroller-staging"
+            artifact_tag="$ARTIFACT_TAG"
+
+            echo "Installing prerequisites (jq, curl, wget, gzip, oras if missing)..."
+            sudo apt-get update -y >/dev/null 2>&1 || echo "apt-get update warning (continuing)"
+            sudo apt-get install -y jq curl wget gzip ca-certificates >/dev/null 2>&1 || {
+              echo "Failed to install base packages"; exit 1; }
+
+            # install oras
+            if ! command -v oras >/dev/null 2>&1; then
+              echo "oras not found; installing latest release"
+              if curl -sSfL https://oras.land/install.sh | sudo sh -s -- -b /usr/local/bin >/dev/null 2>&1; then
+                echo "oras installed (installer script)"
+              else
+                echo "installer script failed, attempting manual GitHub download"
+                tmpdir=$(mktemp -d); cd "$tmpdir"
+                curl -sSL https://api.github.com/repos/oras-project/oras/releases/latest \
+                  | jq -r '.assets[] | select(.name | test("linux_amd64.tar.gz$")) | .browser_download_url' \
+                  | head -n1 \
+                  | xargs -r curl -sSL -o oras.tgz
+                tar -xzf oras.tgz oras || { echo "Failed to extract oras"; exit 1; }
+                sudo mv oras /usr/local/bin/oras
+                cd - >/dev/null || true; rm -rf "$tmpdir"
+                echo "oras installed (manual)"
+              fi
+            else
+              echo "oras already present: $(oras version 2>/dev/null || echo unknown)"
+            fi
+
+            echo "Getting ACR credentials..."
+            token_query_res=$(az acr login -n "$destination_acr_name" -t)
+            token=$(echo "$token_query_res" | jq -r '.accessToken')
+            destination_acr=$(echo "$token_query_res" | jq -r '.loginServer')
+
+            if [ -z "$token" ] || [ "$token" = "null" ]; then
+              echo "Failed to obtain ACR access token" >&2; exit 1; fi
+
+            oras login "$destination_acr" -u "00000000-0000-0000-0000-000000000000" -p "$token" >/dev/null 2>&1 && \
+              echo "oras successfully authenticated." || { echo "oras auth failed"; exit 1; }
+            echo "Successfully retrieved credentials. Destination ACR: $destination_acr."
+
+            current_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            registry="$destination_acr_name.$destination_acr_domain"
+            repository="$destination_acr_repo"
+            full_ref="$registry/$repository"
+
+            echo "Leaving $artifact_tag untagged"
+
+            manifests_json=$(az acr repository show-manifests -n "$destination_acr_name" --repository "$destination_acr_repo" -o json)
+            prev_tags=$(jq -r 'sort_by(.timestamp // .createdTime // .pushTime) | reverse | .[] | (.tags // [])[]?' <<<"$manifests_json" \
+              | awk -v skip="$artifact_tag" '$0!=skip && !seen[$0]++' \
+              | head -n 20 || true)
+
+            echo "$prev_tags" | while IFS= read -r tag; do
+              if [ -n "$tag" ]; then
+                existing_eol=$(oras discover --artifact-type application/vnd.microsoft.artifact.lifecycle "$full_ref:$tag" --format json 2>/dev/null | \
+                  jq -r '.referrers[]? | select(.annotations."vnd.microsoft.artifact.lifecycle.end-of-life.date") | .annotations."vnd.microsoft.artifact.lifecycle.end-of-life.date"')
+                if [ -z "$existing_eol" ]; then
+                  oras attach "$full_ref:$tag" \
+                    --annotation "vnd.microsoft.artifact.lifecycle.end-of-life.date=$current_time" \
+                    --artifact-type "application/vnd.microsoft.artifact.lifecycle" >/dev/null 2>&1 && \
+                    echo "  EOL annotation $current_time attached to $tag" || echo "  Failed attaching EOL annotation to $tag"
+                else
+                  echo "  Skipping, EOL annotation already exists for $tag: $existing_eol"
+                fi
+              fi
+            done
+        env:
+          ARTIFACT_TAG: $(artifact_tag)
