@@ -131,8 +131,8 @@ KUBEBUILDER_ASSETS ?= $(shell $(SETUP_ENVTEST) use --use-env -p path $(KUBEBUILD
 
 # Version
 MAJOR_VER ?= 1
-MINOR_VER ?= 1
-PATCH_VER ?= 23
+MINOR_VER ?= 2
+PATCH_VER ?= 0
 
 # Define Docker related variables. Releases should modify and double check these vars.
 REGISTRY ?= mocimages.azurecr.io
