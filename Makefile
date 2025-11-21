@@ -294,11 +294,18 @@ generate-go: $(CONTROLLER_GEN) $(MOCKGEN) $(CONVERSION_GEN) ## Runs Go related g
 	$(CONTROLLER_GEN) \
 		paths=./api/v1beta2 \
 		object:headerFile=./hack/boilerplate/boilerplate.generatego.txt
+	$(CONTROLLER_GEN) \
+		paths=./api/v1beta1 \
+		object:headerFile=./hack/boilerplate/boilerplate.generatego.txt
+	$(CONVERSION_GEN) \
+		--output-file zz_generated.conversion.go \
+		--go-header-file=./hack/boilerplate/boilerplate.generatego.txt \
+		./api/v1beta1
 	
 .PHONY: generate-manifests
 generate-manifests: $(CONTROLLER_GEN) ## Generate manifests e.g. CRD, RBAC etc.
 	$(CONTROLLER_GEN) \
-		paths=./api/v1beta2 \
+		paths="./api/v1beta1;./api/v1beta2" \
 		crd:crdVersions=v1 \
 		rbac:roleName=manager-role \
 		output:crd:dir=$(CRD_ROOT) \

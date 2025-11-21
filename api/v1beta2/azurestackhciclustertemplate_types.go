@@ -27,6 +27,7 @@ type AzureStackHCIClusterTemplateSpec struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:storageversion
 
 // AzureStackHCIClusterTemplate is the Schema for the azurestackhciclustertemplates API
 type AzureStackHCIClusterTemplate struct {
