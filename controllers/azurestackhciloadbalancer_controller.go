@@ -274,6 +274,7 @@ func (r *AzureStackHCILoadBalancerReconciler) reconcileNormal(lbs *scope.LoadBal
 		conditions.Set(lbs.AzureStackHCILoadBalancer, metav1.Condition{
 			Type:   infrav1.LoadBalancerInfrastructureReadyCondition,
 			Status: metav1.ConditionTrue,
+			Reason: "InfrastructureReady",
 		})
 		r.Recorder.Eventf(lbs.AzureStackHCILoadBalancer, corev1.EventTypeNormal, "LoadBalancerReady", "AzureStackHCILoadBalancer %s infrastructure is ready", lbs.Name())
 	}

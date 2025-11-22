@@ -178,6 +178,7 @@ func (r *AzureStackHCIVirtualMachineReconciler) reconcileNormal(virtualMachineSc
 		conditions.Set(virtualMachineScope.AzureStackHCIVirtualMachine, metav1.Condition{
 			Type:   infrav1.VMRunningCondition,
 			Status: metav1.ConditionTrue,
+			Reason: string(infrav1.VMStateSucceeded),
 		})
 	case infrav1.VMStateUpdating:
 		virtualMachineScope.Info("Machine VM is updating", "name", virtualMachineScope.Name())
