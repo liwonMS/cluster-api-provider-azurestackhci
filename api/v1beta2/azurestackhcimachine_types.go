@@ -20,7 +20,6 @@ package v1beta2
 import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
 const (
@@ -85,7 +84,18 @@ type AzureStackHCIMachineStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	Initialization *clusterv1.MachineInitializationStatus `json:"initialization,omitempty"`
+	// Initialization provides observations of the AzureStackHCIMachine initialization process.
+	// +optional
+	Initialization *AzureStackHCIMachineInitializationStatus `json:"initialization,omitempty,omitzero"`
+}
+
+// AzureStackHCIMachineInitializationStatus provides observations of the AzureStackHCIMachine initialization process.
+// +kubebuilder:validation:MinProperties=1
+type AzureStackHCIMachineInitializationStatus struct {
+	// Provisioned is true when the infrastructure provider reports that the Machine's infrastructure is fully provisioned.
+	// NOTE: this field is part of the Cluster API contract, and it is used to orchestrate initial Machine provisioning.
+	// +optional
+	Provisioned *bool `json:"provisioned,omitempty"`
 }
 
 // +kubebuilder:object:root=true

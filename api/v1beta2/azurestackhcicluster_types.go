@@ -67,9 +67,17 @@ type AzureStackHCIClusterStatus struct {
 	// Initialization provides observations of the Cluster initialization process.
 	// NOTE: fields in this struct are part of the Cluster API contract and are used to orchestrate initial Cluster provisioning.
 	// The value of those fields is never updated after provisioning is completed.
-	// Use conditions to monitor the operational state of the Cluster's BootstrapSecret.
 	// +optional
-	Initialization *clusterv1.ClusterInitializationStatus `json:"initialization,omitempty"`
+	Initialization *AzureStackHCIClusterInitializationStatus `json:"initialization,omitempty,omitzero"`
+}
+
+// AzureStackHCIClusterInitializationStatus provides observations of the AzureStackHCICluster initialization process.
+// +kubebuilder:validation:MinProperties=1
+type AzureStackHCIClusterInitializationStatus struct {
+	// Provisioned is true when the infrastructure provider reports that the Cluster's infrastructure is fully provisioned.
+	// NOTE: this field is part of the Cluster API contract, and it is used to orchestrate initial Cluster provisioning.
+	// +optional
+	Provisioned *bool `json:"provisioned,omitempty"`
 }
 
 // SetTypedPhase sets the Phase field to the string representation of AzureStackHCIClusterPhase.

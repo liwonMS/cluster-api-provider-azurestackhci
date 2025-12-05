@@ -197,12 +197,30 @@ func (r *AzureStackHCIClusterReconciler) reconcileNormal(clusterScope *scope.Clu
 	}
 
 	// No errors, so mark us ready so the Cluster API Cluster Controller can pull it
-	*azureStackHCICluster.Status.Initialization.InfrastructureProvisioned = true
+	// Initialize Status.Initialization if needed
+	if azureStackHCICluster.Status.Initialization == nil {
+		azureStackHCICluster.Status.Initialization = &infrav1.AzureStackHCIClusterInitializationStatus{}
+	}
+	if azureStackHCICluster.Status.Initialization.Provisioned == nil {
+		trueVal := true
+		azureStackHCICluster.Status.Initialization.Provisioned = &trueVal
+	} else {
+		*azureStackHCICluster.Status.Initialization.Provisioned = true
+	}
+	// Set provider-specific condition
 	readyCondition := metav1.Condition{
 		Type:   infrav1.NetworkInfrastructureReadyCondition,
 		Status: metav1.ConditionTrue,
+		Reason: "InfrastructureReady",
 	}
 	conditions.Set(azureStackHCICluster, readyCondition)
+
+	// Set the standard Ready condition that CAPI expects
+	conditions.Set(azureStackHCICluster, metav1.Condition{
+		Type:   clusterv1.ReadyCondition,
+		Status: metav1.ConditionTrue,
+		Reason: "InfrastructureReady",
+	})
 
 	return reconcile.Result{}, nil
 }
@@ -479,12 +497,16 @@ func (r *AzureStackHCIClusterReconciler) reconcilePhase(clusterScope *scope.Clus
 		azureStackHCICluster.Status.SetTypedPhase(infrav1.AzureStackHCIClusterPhasePending)
 	}
 
-	if !*azureStackHCICluster.Status.Initialization.InfrastructureProvisioned {
-		azureStackHCICluster.Status.SetTypedPhase(infrav1.AzureStackHCIClusterPhaseProvisioning)
-	}
+	if azureStackHCICluster.Status.Initialization != nil && azureStackHCICluster.Status.Initialization.Provisioned != nil {
+		if !*azureStackHCICluster.Status.Initialization.Provisioned {
+			azureStackHCICluster.Status.SetTypedPhase(infrav1.AzureStackHCIClusterPhaseProvisioning)
+		}
 
-	if *azureStackHCICluster.Status.Initialization.InfrastructureProvisioned {
-		azureStackHCICluster.Status.SetTypedPhase(infrav1.AzureStackHCIClusterPhaseProvisioned)
+		if *azureStackHCICluster.Status.Initialization.Provisioned {
+			azureStackHCICluster.Status.SetTypedPhase(infrav1.AzureStackHCIClusterPhaseProvisioned)
+		}
+	} else {
+		azureStackHCICluster.Status.SetTypedPhase(infrav1.AzureStackHCIClusterPhaseProvisioning)
 	}
 
 	if !azureStackHCICluster.DeletionTimestamp.IsZero() {

@@ -643,23 +643,12 @@ spec:
                   Initialization provides observations of the Cluster initialization process.
                   NOTE: fields in this struct are part of the Cluster API contract and are used to orchestrate initial Cluster provisioning.
                   The value of those fields is never updated after provisioning is completed.
-                  Use conditions to monitor the operational state of the Cluster's BootstrapSecret.
                 minProperties: 1
                 properties:
-                  controlPlaneInitialized:
+                  provisioned:
                     description: |-
-                      controlPlaneInitialized denotes when the control plane is functional enough to accept requests.
-                      This information is usually used as a signal for starting all the provisioning operations that depends on
-                      a functional API server, but do not require a full HA control plane to exists, like e.g. join worker Machines,
-                      install core addons like CNI, CPI, CSI etc.
-                      NOTE: this field is part of the Cluster API contract, and it is used to orchestrate provisioning.
-                      The value of this field is never updated after initialization is completed.
-                    type: boolean
-                  infrastructureProvisioned:
-                    description: |-
-                      infrastructureProvisioned is true when the infrastructure provider reports that Cluster's infrastructure is fully provisioned.
-                      NOTE: this field is part of the Cluster API contract, and it is used to orchestrate provisioning.
-                      The value of this field is never updated after provisioning is completed.
+                      Provisioned is true when the infrastructure provider reports that the Cluster's infrastructure is fully provisioned.
+                      NOTE: this field is part of the Cluster API contract, and it is used to orchestrate initial Cluster provisioning.
                     type: boolean
                 type: object
               phase:

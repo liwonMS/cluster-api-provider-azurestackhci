@@ -32,7 +32,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2/klogr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
-	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -176,12 +175,6 @@ func (s *ClusterScope) ListOptionsLabelSelector() client.ListOption {
 
 // PatchObject persists the cluster configuration and status.
 func (s *ClusterScope) PatchObject() error {
-	newCondition, err := conditions.NewSummaryCondition(s.AzureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, conditions.ForConditionTypes{infrav1.NetworkInfrastructureReadyCondition})
-	if err != nil {
-		return fmt.Errorf("unable to generate summary condition: %e", err)
-	}
-	conditions.Set(s.AzureStackHCICluster, *newCondition)
-
 	return s.patchHelper.Patch(s.Context,
 		s.AzureStackHCICluster,
 		patch.WithOwnedConditions{Conditions: []string{

@@ -20,7 +20,6 @@ package scope
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
 
 	"github.com/go-logr/logr"
 	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta2"
@@ -32,7 +31,6 @@ import (
 	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util"
-	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -46,6 +44,7 @@ type MachineScopeParams struct {
 	Machine              *clusterv1.Machine
 	AzureStackHCICluster *infrav1.AzureStackHCICluster
 	AzureStackHCIMachine *infrav1.AzureStackHCIMachine
+	Context              context.Context
 }
 
 // NewMachineScope creates a new MachineScope from the supplied parameters.
@@ -76,6 +75,10 @@ func NewMachineScope(params MachineScopeParams) (*MachineScope, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to init patch helper")
 	}
+	if params.Context == nil {
+		params.Context = context.Background()
+	}
+
 	return &MachineScope{
 		client:               params.Client,
 		Cluster:              params.Cluster,
@@ -84,6 +87,7 @@ func NewMachineScope(params MachineScopeParams) (*MachineScope, error) {
 		AzureStackHCIMachine: params.AzureStackHCIMachine,
 		Logger:               *params.Logger,
 		patchHelper:          helper,
+		Context:              params.Context,
 	}, nil
 }
 
@@ -97,6 +101,7 @@ type MachineScope struct {
 	Machine              *clusterv1.Machine
 	AzureStackHCICluster *infrav1.AzureStackHCICluster
 	AzureStackHCIMachine *infrav1.AzureStackHCIMachine
+	Context              context.Context
 }
 
 // Location returns the AzureStackHCIMachine location.
@@ -168,7 +173,15 @@ func (m *MachineScope) SetVMState(v *infrav1.VMState) {
 
 // SetReady sets the AzureStackHCIMachine Ready Status
 func (m *MachineScope) SetReady() {
-	*m.AzureStackHCIMachine.Status.Initialization.InfrastructureProvisioned = true
+	if m.AzureStackHCIMachine.Status.Initialization == nil {
+		m.AzureStackHCIMachine.Status.Initialization = &infrav1.AzureStackHCIMachineInitializationStatus{}
+	}
+	if m.AzureStackHCIMachine.Status.Initialization.Provisioned == nil {
+		trueVal := true
+		m.AzureStackHCIMachine.Status.Initialization.Provisioned = &trueVal
+	} else {
+		*m.AzureStackHCIMachine.Status.Initialization.Provisioned = true
+	}
 }
 
 // SetAnnotation sets a key value annotation on the AzureStackHCIMachine.
@@ -181,14 +194,8 @@ func (m *MachineScope) SetAnnotation(key, value string) {
 
 // PatchObject persists the machine spec and status.
 func (m *MachineScope) PatchObject() error {
-	summary, err := conditions.NewSummaryCondition(m.AzureStackHCIMachine, infrav1.VMRunningCondition, conditions.ForConditionTypes{infrav1.VMRunningCondition})
-	if err != nil {
-		return fmt.Errorf("unable to generate summary condition: %e", err)
-	}
-	conditions.Set(m.AzureStackHCIMachine, *summary)
-
 	return m.patchHelper.Patch(
-		context.TODO(),
+		m.Context,
 		m.AzureStackHCIMachine,
 		patch.WithOwnedConditions{Conditions: []string{
 			clusterv1.ReadyCondition,

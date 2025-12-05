@@ -168,6 +168,7 @@ func (r *AzureStackHCIMachineReconciler) Reconcile(ctx context.Context, req ctrl
 		Machine:              machine,
 		AzureStackHCICluster: azureStackHCICluster,
 		AzureStackHCIMachine: azureStackHCIMachine,
+		Context:              ctx,
 	})
 	if err != nil {
 		r.Recorder.Eventf(azureStackHCIMachine, corev1.EventTypeWarning, "FailureCreateMachineScope", errors.Wrapf(err, "failed to create machine scope").Error())
@@ -209,9 +210,26 @@ func (r *AzureStackHCIMachineReconciler) reconcileNormal(machineScope *scope.Mac
 		return reconcile.Result{}, err
 	}
 
-	if machineScope.Cluster.Status.Initialization.InfrastructureProvisioned == nil || !*machineScope.Cluster.Status.Initialization.InfrastructureProvisioned {
+	// Check if the infrastructure cluster is ready by checking our own AzureStackHCICluster status
+	if clusterScope.AzureStackHCICluster.Status.Initialization == nil ||
+		clusterScope.AzureStackHCICluster.Status.Initialization.Provisioned == nil ||
+		!*clusterScope.AzureStackHCICluster.Status.Initialization.Provisioned {
 		machineScope.Info("Cluster infrastructure is not ready yet")
 		return reconcile.Result{}, nil
+	}
+
+	// Set machine infrastructure as provisioned so CAPI knows we're ready to accept bootstrap data
+	// This must be set before we check for bootstrap data to avoid a circular dependency
+	if machineScope.AzureStackHCIMachine.Status.Initialization == nil {
+		machineScope.AzureStackHCIMachine.Status.Initialization = &infrav1.AzureStackHCIMachineInitializationStatus{}
+	}
+	if machineScope.AzureStackHCIMachine.Status.Initialization.Provisioned == nil {
+		trueVal := true
+		machineScope.AzureStackHCIMachine.Status.Initialization.Provisioned = &trueVal
+		if err := machineScope.PatchObject(); err != nil {
+			return reconcile.Result{}, err
+		}
+		machineScope.Info("Set machine infrastructure as provisioned")
 	}
 
 	// Make sure bootstrap data is available and populated.
@@ -253,8 +271,18 @@ func (r *AzureStackHCIMachineReconciler) reconcileNormal(machineScope *scope.Mac
 	case infrav1.VMStateSucceeded:
 		machineScope.Info("Machine VM is running", "name", vm.Name)
 		machineScope.SetReady()
+		conditions.Set(machineScope.AzureStackHCIMachine, metav1.Condition{
+			Type:   infrav1.VMRunningCondition,
+			Status: metav1.ConditionTrue,
+			Reason: "VMRunning",
+		})
 	case infrav1.VMStateUpdating:
 		machineScope.Info("Machine VM is updating", "name", vm.Name)
+		conditions.Set(machineScope.AzureStackHCIMachine, metav1.Condition{
+			Type:   infrav1.VMRunningCondition,
+			Status: metav1.ConditionFalse,
+			Reason: "VMUpdating",
+		})
 	default:
 		conditions.Set(machineScope.AzureStackHCIMachine, metav1.Condition{
 			Type:    infrav1.VMRunningCondition,

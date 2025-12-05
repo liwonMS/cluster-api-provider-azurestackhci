@@ -30,7 +30,6 @@ import (
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2/klogr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
-	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -192,14 +191,6 @@ func (m *VirtualMachineScope) SetAnnotation(key, value string) {
 
 // PatchObject persists the virtual machine spec and status.
 func (m *VirtualMachineScope) PatchObject() error {
-	summary, err := conditions.NewSummaryCondition(m.AzureStackHCIVirtualMachine,
-		infrav1.VMRunningCondition,
-		conditions.ForConditionTypes{infrav1.VMRunningCondition})
-	if err != nil {
-		return fmt.Errorf("unable to generate summary: %e", err)
-	}
-	conditions.Set(m.AzureStackHCIVirtualMachine, *summary)
-
 	return m.patchHelper.Patch(m.Context,
 		m.AzureStackHCIVirtualMachine,
 		patch.WithOwnedConditions{Conditions: []string{
