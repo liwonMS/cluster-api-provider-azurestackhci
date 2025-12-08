@@ -140,6 +140,7 @@ func (r *AzureStackHCILoadBalancerReconciler) reconcileVirtualMachines(lbs *scop
 		conditions.Set(lbs.AzureStackHCILoadBalancer, metav1.Condition{
 			Type:   infrav1.LoadBalancerReplicasReadyCondition,
 			Status: metav1.ConditionTrue,
+			Reason: "AllReplicasReady",
 		})
 		r.Recorder.Eventf(lbs.AzureStackHCILoadBalancer, corev1.EventTypeNormal, "LoadBalancerReplicasReady", "All replicas for AzureStackHCILoadBalancer %s are ready", lbs.Name())
 	}
