@@ -213,6 +213,9 @@ func (l *LoadBalancerScope) SetPort(port int32) {
 
 // GetPort returns the Port field of the AzureStackHCILoadBalancer Status.
 func (l *LoadBalancerScope) GetPort() int32 {
+	if l.AzureStackHCILoadBalancer == nil || l.AzureStackHCILoadBalancer.Status.Port == 0 {
+		return 6443
+	}
 	return l.AzureStackHCILoadBalancer.Status.Port
 }
 

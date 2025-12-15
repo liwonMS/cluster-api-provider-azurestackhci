@@ -190,6 +190,9 @@ func (s *ClusterScope) Close() error {
 
 // APIServerPort returns the APIServerPort to use when creating the load balancer.
 func (s *ClusterScope) APIServerPort() int32 {
+	if s.Cluster == nil || s.Cluster.Spec.ClusterNetwork.APIServerPort == 0 {
+		return 6443
+	}
 	return s.Cluster.Spec.ClusterNetwork.APIServerPort
 }
 
