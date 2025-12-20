@@ -43,6 +43,7 @@ const (
 // TODO: We should decide if we want to keep this
 type azureStackHCIVirtualMachineService struct {
 	vmScope              *scope.VirtualMachineScope
+	ipamSvc              *networkinterfaces.IPAMService
 	networkInterfacesSvc azurestackhci.Service
 	virtualMachinesSvc   azurestackhci.GetterService
 	disksSvc             azurestackhci.GetterService
@@ -52,7 +53,7 @@ type azureStackHCIVirtualMachineService struct {
 func newAzureStackHCIVirtualMachineService(vmScope *scope.VirtualMachineScope) *azureStackHCIVirtualMachineService {
 	return &azureStackHCIVirtualMachineService{
 		vmScope:              vmScope,
-		networkInterfacesSvc: networkinterfaces.NewService(vmScope),
+		networkInterfacesSvc: networkinterfaces.NewService(vmScope, networkinterfaces.NewIPAMHelper(vmScope, "")),
 		virtualMachinesSvc:   virtualmachines.NewService(vmScope),
 		disksSvc:             disks.NewService(vmScope),
 	}

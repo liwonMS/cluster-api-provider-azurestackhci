@@ -1,8 +1,10 @@
 module github.com/microsoft/cluster-api-provider-azurestackhci
 
-go 1.23.0
+go 1.24.4
 
 require (
+	//dev.azure.com/msazure/One/_git/azlocal-overlay.git/api v0.0.0
+	//dev.azure.com/msazure/msk8s/_git/azstackhci-operator.git v0.11.1-alpha.34
 	github.com/Azure/go-autorest/autorest/to v0.4.0
 	github.com/blang/semver v3.5.1+incompatible
 	github.com/go-logr/logr v1.4.2
@@ -105,11 +107,19 @@ require (
 )
 
 replace (
+	//dev.azure.com/msazure/One/_git/azlocal-overlay.git/api => ../azlocal-overlay/api
+	//dev.azure.com/msazure/One/_git/azlocal-overlay.git/build/version => ../azlocal-overlay/build/version
+	//dev.azure.com/msazure/One/_git/azlocal-overlay.git/observability => ../azlocal-overlay/observability
+	//dev.azure.com/msazure/One/_git/azlocal-overlay.git/operators/ipam => ../azlocal-overlay/operators/ipam
+	//dev.azure.com/msazure/One/_git/azlocal-overlay.git/util => ../azlocal-overlay/util
+	//dev.azure.com/msazure/msk8s/_git/azstackhci-operator.git => ../azstackhci-operator
+	//dev.azure.com/msazure/msk8s/_git/moc-operator.git => ../moc-operator
 	github.com/dgrijalva/jwt-go => github.com/golang-jwt/jwt/v4 v4.1.0
 	github.com/elazarl/goproxy => github.com/elazarl/goproxy v0.0.0-20230731152917-f99041a5c027
 	github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
 	github.com/golang-jwt/jwt/v4 => github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/gorilla/websocket => github.com/gorilla/websocket v1.4.2
+	//github.com/microsoft/moc-pkg => ../moc-pkg
 	github.com/miekg/dns => github.com/miekg/dns v1.1.25
 	github.com/nats-io/nats-server/v2 => github.com/nats-io/nats-server/v2 v2.9.23
 	github.com/nats-io/nkeys => github.com/nats-io/nkeys v0.4.6
@@ -117,6 +127,7 @@ replace (
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp => go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.44.0
 	golang.org/x/image => golang.org/x/image v0.10.0
 	google.golang.org/grpc => google.golang.org/grpc v1.56.3
+//sigs.k8s.io/cluster-api => ../cluster-api
 )
 
 // Brought in by google.golang.org/grpc bump to 1.56.3, but uses CC-BY-SA-3.0 copyleft license
