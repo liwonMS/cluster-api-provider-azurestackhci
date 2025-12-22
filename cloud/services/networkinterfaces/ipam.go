@@ -45,6 +45,7 @@ type IPAddressAllocationType string
 const (
 	IPAddressAllocationTypeDynamic IPAddressAllocationType = "Dynamic"
 	IPAddressAllocationTypeStatic  IPAddressAllocationType = "Static"
+	AzstackhciAPIGroup             string                  = "infrastructure.azstackhci.microsoft.com"
 )
 
 const (
@@ -54,9 +55,10 @@ const (
 	IPAMPollInterval = 500 * time.Millisecond
 
 	// Annotations for tracking IPClaim source and ownership
-	AnnotationCreatedBy        = "ipam.cluster.x-k8s.io/created-by"
-	AnnotationCreatedByCAPA    = "cluster-api-provider-azurestackhci"
-	AnnotationAllocationSource = "ipam.cluster.x-k8s.io/allocation-source"
+	AnnotationCreatedBy        = AzstackhciAPIGroup + "/created-by"
+	AnnotationStaticIP         = AzstackhciAPIGroup + "/static-ip"
+	AnnotationCreatedByCAPA    = AzstackhciAPIGroup + "/created-by-capa"
+	AnnotationAllocationSource = AzstackhciAPIGroup + "/allocation-source"
 	AllocationSourceIPAM       = "IPAM"
 	AllocationSourceMOC        = "MOC"
 )
@@ -71,38 +73,38 @@ const (
 
 // IPAMService provides functionality to manage IPAddressClaim CRs for network interfaces
 type IPAMService struct {
-	client client.Client
-	logger logr.Logger
-	vmMeta VmMeta
-	nicSpec VmNicSpec
+	client  client.Client
+	logger  logr.Logger
+	vmMeta  VmMeta
+	nicSpec NicSpec
 }
 
 type VmMeta struct {
 	clusterName string
-	vmName string
-	namespace string
-	vmRef metav1.Object
+	vmName      string
+	namespace   string
+	vmRef       metav1.Object
 }
 
-type VmNicSpec struct {
-	vnetName       string
-	subnetName     string
+type NicSpec struct {
+	vnetName   string
+	subnetName string
 }
 
 // NewIPAMHelper creates a new IPAM helper instance with the provided client and logger
 func NewIPAMHelper(vmscope *scope.VirtualMachineScope) *IPAMService {
 	return &IPAMService{
-		client:    vmscope.Client(),
-		logger:    vmscope.GetLogger(),
-		vmMeta:   VmMeta{
+		client: vmscope.Client(),
+		logger: vmscope.GetLogger(),
+		vmMeta: VmMeta{
 			clusterName: vmscope.ClusterName(),
-			vmName:     vmscope.Name(),
+			vmName:      vmscope.Name(),
 			namespace:   vmscope.Namespace(),
-			vmRef:      vmscope.AzureStackHCIVirtualMachine,
+			vmRef:       vmscope.AzureStackHCIVirtualMachine,
 		},
-		nicSpec: VmNicSpec{
-			vnetName:       vmscope.VnetName(),
-			subnetName:     vmscope.SubnetName(),
+		nicSpec: NicSpec{
+			vnetName:   vmscope.VnetName(),
+			subnetName: vmscope.SubnetName(),
 		},
 	}
 }
@@ -110,9 +112,9 @@ func NewIPAMHelper(vmscope *scope.VirtualMachineScope) *IPAMService {
 // AllocateIP tries to allocate a private IP for the given NIC using IPAM.
 // If successful, it sets the allocated IP in the NIC spec.
 // If fails to create the IPAllocation or retrieve the IP, it logs the error and allows MOC to handle the IP allocation.
-func (h *IPAMService) AllocateIPClaim(ctx context.Context, claimName string) (string, error) {
+func (h *IPAMService) AllocateIPClaim(ctx context.Context, claimName, staticIPAddress string) (string, error) {
 	logger := h.logger.WithValues("AllocateVmIPClaim", h.vmMeta.vmName, "claimName", claimName)
-	if _, err := h.createIPClaim(ctx, logger, claimName); err != nil {
+	if _, err := h.createIPClaim(ctx, logger, claimName, staticIPAddress); err != nil {
 		return "", fmt.Errorf("Failed to create IPAllocation for nic: %w", err)
 	}
 
@@ -152,7 +154,7 @@ func (h *IPAMService) SyncIPClaim(ctx context.Context, claimName, mocAllocatedIP
 	}
 
 	logger := h.logger.WithValues("IPAllocationSync", h.vmMeta.vmName, "claimName", claimName)
-	
+
 	// Use timeout for sync operations
 	syncCtx, cancel := context.WithTimeout(ctx, IPAMTimeout)
 	defer cancel()
@@ -172,7 +174,7 @@ func (h *IPAMService) SyncIPClaim(ctx context.Context, claimName, mocAllocatedIP
 		return nil
 	}
 
-	if _, err = h.createIPClaim(ctx, logger, claimName); err != nil {
+	if _, err = h.createIPClaim(ctx, logger, claimName, mocAllocatedIP); err != nil {
 		logger.Info("Failed to allocate IP from IPAM", "ipAllocation", ipAllocation.Name, "error", err)
 	}
 
@@ -182,7 +184,7 @@ func (h *IPAMService) SyncIPClaim(ctx context.Context, claimName, mocAllocatedIP
 
 // createIPClaim creates IPAddressClaim for static IP allocation with proper owner references
 // Returns the claim name on success or error on failure
-func (h *IPAMService) createIPClaim(ctx context.Context, logger logr.Logger, claimName string) (string, error) {
+func (h *IPAMService) createIPClaim(ctx context.Context, logger logr.Logger, claimName, ip string) (string, error) {
 	// Validate NIC has at least one IP configuration with a subnet
 	logger.Info("createIPClaim IPAddressClaim details",
 		"name", claimName,
@@ -200,24 +202,21 @@ func (h *IPAMService) createIPClaim(ctx context.Context, logger logr.Logger, cla
 			Annotations: map[string]string{
 				AnnotationCreatedBy:        AnnotationCreatedByCAPA,
 				AnnotationAllocationSource: AllocationSourceIPAM,
+				AnnotationStaticIP:         ip,
 			},
 		},
 		Spec: v1beta1.IPAddressClaimSpec{
 			ClusterName: h.vmMeta.clusterName,
 			PoolRef: corev1.TypedLocalObjectReference{
-				Name: h.resolvePoolName(),
-				Kind: "IPPool",
-				APIGroup: strPtr("infrastructure.azstackhci.microsoft.com"),
+				Name:     h.resolvePoolName(),
+				Kind:     "IPPool",
+				APIGroup: strPtr(AzstackhciAPIGroup),
 			},
 		},
 	}
 
-	// Set owner reference to AzureStackHCIVirtualMachine for automatic cleanup
-	// When the VM is deleted, Kubernetes will automatically delete the IPClaim
-	if h.vmMeta.vmRef != nil {
-		if err := controllerutil.SetOwnerReference(h.vmMeta.vmRef, claim, h.client.Scheme()); err != nil {
-			return "", fmt.Errorf("failed to set VM owner reference on IPClaim: %w", err)
-		}
+	if err := controllerutil.SetOwnerReference(h.vmMeta.vmRef, claim, h.client.Scheme(), controllerutil.WithBlockOwnerDeletion(false)); err != nil {
+		return "", fmt.Errorf("failed to set VM owner reference on IPClaim: %w", err)
 	}
 
 	if err := h.client.Create(ctx, claim); err != nil {

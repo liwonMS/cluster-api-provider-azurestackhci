@@ -107,11 +107,7 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 
 	if len(nicSpec.IPConfigurations) > 0 {
 		logger.Info("Adding ipconfigurations to nic ", "len", len(nicSpec.IPConfigurations), "name", nicSpec.Name)
-		for index, ipconfig := range nicSpec.IPConfigurations {
-			allocatedIP, err := nicSpec.IPAMService.AllocateIPClaim(ctx, s.IPAMService.GenerateIPClaimName(nicSpec.Name, index))
-			if err != nil {
-				logger.Error(err, "IPAM allocation failed for nic %s on ipConfig at index %d", nicSpec.Name, index)
-			}
+		for _, ipconfig := range nicSpec.IPConfigurations {
 			networkIPConfig := network.InterfaceIPConfiguration{
 				Name: &ipconfig.Name,
 				InterfaceIPConfigurationPropertiesFormat: &network.InterfaceIPConfigurationPropertiesFormat{
@@ -119,7 +115,6 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 					Subnet: &network.APIEntityReference{
 						ID: to.StringPtr(nicSpec.VnetName),
 					},
-					PrivateIPAddress: to.StringPtr(allocatedIP),
 				},
 			}
 
@@ -130,14 +125,6 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 			*networkInterface.IPConfigurations = append(*networkInterface.IPConfigurations, networkIPConfig)
 		}
 	} else {
-		allocatedIP, err := nicSpec.IPAMService.AllocateIPClaim(ctx, s.IPAMService.GenerateIPClaimName(nicSpec.Name, 0))
-		if err != nil || allocatedIP == "" {
-			logger.Error(err, "IPAM allocation failed for %s-d%d", nicSpec.Name, 0)
-		}
-		if nicSpec.StaticIPAddress != "" {
-			allocatedIP = nicSpec.StaticIPAddress
-		}
-		nicConfig.PrivateIPAddress = to.StringPtr(allocatedIP)
 		networkIPConfig := network.InterfaceIPConfiguration{
 			Name:                                     to.StringPtr("pipConfig"),
 			InterfaceIPConfigurationPropertiesFormat: nicConfig,
@@ -145,6 +132,13 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 
 		*networkInterface.IPConfigurations = append(*networkInterface.IPConfigurations, networkIPConfig)
 	}
+
+	// assign ipam IP to the moc nic object.
+	if err := s.AllocateNicIPClaim(ctx, networkInterface, nicSpec.StaticIPAddress); err != nil {
+		logger.Error(err, "Failed to allocate IPClaim for network interface", "name", nicSpec.Name)
+	}
+
+	logger.Info("creating network interface ", "name", nicSpec.Name)
 
 	_, err := s.Client.CreateOrUpdate(ctx,
 		s.Scope.GetResourceGroup(),
@@ -191,6 +185,25 @@ func (s *Service) Delete(ctx context.Context, spec interface{}) error {
 	return err
 }
 
+func (s *Service) AllocateNicIPClaim(ctx context.Context, mocNic network.Interface, staticIPAddress string) error {
+	telemetry.WriteMocInfoLog(ctx, s.Scope)
+	var errMsgs string
+	for index, ipconfig := range *mocNic.IPConfigurations {
+		claimName := s.IPAMService.GenerateIPClaimName(*mocNic.Name, index)
+		allocatedIP, err := s.IPAMService.AllocateIPClaim(ctx, claimName, staticIPAddress)
+		if err != nil {
+			s.Scope.GetLogger().Info("Failed to allocate IPClaim during reconcile", "error", err)
+			errMsgs += err.Error() + "; "
+		} else {
+			ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress = to.StringPtr(allocatedIP)
+		}
+	}
+
+	if errMsgs != "" {
+		return errors.New(errMsgs)
+	}
+	return nil
+}
 
 func (s *Service) SyncNicIPClaim(ctx context.Context, mocNic network.Interface) error {
 	telemetry.WriteMocInfoLog(ctx, s.Scope)
