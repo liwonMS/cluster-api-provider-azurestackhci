@@ -195,7 +195,7 @@ func (r *AzureStackHCIVirtualMachineReconciler) getOrCreate(virtualMachineScope 
 	if err != nil {
 		wrappedErr := errors.Wrapf(err, "Failed to query for AzureStackHCIVirtualMachine %s/%s", virtualMachineScope.Namespace(), virtualMachineScope.Name())
 		r.Recorder.Eventf(virtualMachineScope.AzureStackHCIVirtualMachine, corev1.EventTypeWarning, "FailureQueryForVM", wrappedErr.Error())
-		conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.VMNotFoundReason, clusterv1.ConditionSeverityError, err.Error())
+		conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.VMNotFoundReason, clusterv1.ConditionSeverityError, "%s", err.Error())
 		return nil, err
 	}
 
@@ -206,22 +206,22 @@ func (r *AzureStackHCIVirtualMachineReconciler) getOrCreate(virtualMachineScope 
 		if err != nil {
 			switch mocerrors.GetErrorCode(err) {
 			case mocerrors.OutOfMemory.Error():
-				conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.OutOfMemoryReason, clusterv1.ConditionSeverityError, err.Error())
+				conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.OutOfMemoryReason, clusterv1.ConditionSeverityError, "%s", err.Error())
 			case mocerrors.OutOfCapacity.Error():
-				conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.OutOfCapacityReason, clusterv1.ConditionSeverityError, err.Error())
+				conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.OutOfCapacityReason, clusterv1.ConditionSeverityError, "%s", err.Error())
 			case mocerrors.OutOfNodeCapacity.Error():
-				conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.OutOfNodeCapacityReason, clusterv1.ConditionSeverityWarning, err.Error())
+				conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.OutOfNodeCapacityReason, clusterv1.ConditionSeverityWarning, "%s", err.Error())
 			case mocerrors.NotFound.Error(): // "NotFound"
 				fallthrough
 			// Internally, NotFound is a legacy error and returns the error string instead.
 			case moccodes.NotFound.String(): // "Not Found"
 				if mocerrors.IsPathNotFound(err) {
-					conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.PathNotFoundReason, clusterv1.ConditionSeverityError, err.Error())
+					conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.PathNotFoundReason, clusterv1.ConditionSeverityError, "%s", err.Error())
 				} else {
-					conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.NotFoundReason, clusterv1.ConditionSeverityError, err.Error())
+					conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.NotFoundReason, clusterv1.ConditionSeverityError, "%s", err.Error())
 				}
 			default:
-				conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.VMProvisionFailedReason, clusterv1.ConditionSeverityError, err.Error())
+				conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.VMProvisionFailedReason, clusterv1.ConditionSeverityError, "%s", err.Error())
 			}
 
 			wrappedErr := errors.Wrapf(err, "failed to create AzureStackHCIVirtualMachine")
@@ -230,6 +230,13 @@ func (r *AzureStackHCIVirtualMachineReconciler) getOrCreate(virtualMachineScope 
 			return nil, wrappedErr
 		}
 		r.Recorder.Eventf(virtualMachineScope.AzureStackHCIVirtualMachine, corev1.EventTypeNormal, "SuccessfulCreateVM", "Success creating AzureStackHCIVirtualMachine %s/%s", virtualMachineScope.Namespace(), virtualMachineScope.Name())
+	}
+
+	// calling this here to ensure nic ip claims are created for existing vms as well, this is needed for
+	// brownfield scenarios where VMs already exist when we introduce IPAM
+	_, err = ams.ReconcileNics()
+	if err != nil {
+		return nil, err
 	}
 
 	return vm, nil
@@ -243,7 +250,7 @@ func (r *AzureStackHCIVirtualMachineReconciler) reconcileDelete(virtualMachineSc
 	if err := newAzureStackHCIVirtualMachineService(virtualMachineScope).Delete(); err != nil {
 		wrappedErr := errors.Wrapf(err, "error deleting AzureStackHCIVirtualMachine %s/%s", virtualMachineScope.Namespace(), virtualMachineScope.Name())
 		r.Recorder.Eventf(virtualMachineScope.AzureStackHCIVirtualMachine, corev1.EventTypeWarning, "FailureDeleteVM", wrappedErr.Error())
-		conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, clusterv1.DeletionFailedReason, clusterv1.ConditionSeverityWarning, err.Error())
+		conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, clusterv1.DeletionFailedReason, clusterv1.ConditionSeverityWarning, "%s", err.Error())
 		return reconcile.Result{}, wrappedErr
 	}
 	r.Recorder.Eventf(virtualMachineScope.AzureStackHCIVirtualMachine, corev1.EventTypeNormal, "SuccessfulDeleteVM", "Success deleting AzureStackHCIVirtualMachine %s/%s", virtualMachineScope.Namespace(), virtualMachineScope.Name())

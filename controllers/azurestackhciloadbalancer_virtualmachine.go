@@ -50,7 +50,7 @@ func (r *AzureStackHCILoadBalancerReconciler) reconcileVirtualMachines(lbs *scop
 		if conditions.IsFalse(vm, infrav1.VMRunningCondition) {
 			cond := conditions.Get(vm, infrav1.VMRunningCondition)
 			if cond.Severity == clusterv1.ConditionSeverityError {
-				conditions.MarkFalse(lbs.AzureStackHCILoadBalancer, infrav1.LoadBalancerReplicasReadyCondition, cond.Reason, cond.Severity, cond.Message)
+				conditions.MarkFalse(lbs.AzureStackHCILoadBalancer, infrav1.LoadBalancerReplicasReadyCondition, cond.Reason, cond.Severity, "%s", cond.Message)
 				return reconcile.Result{}, nil
 			}
 		}

@@ -334,7 +334,7 @@ func (r *AzureStackHCIClusterReconciler) reconcileAzureStackHCILoadBalancer(clus
 	}
 	if err != nil {
 		if !apierrors.IsAlreadyExists(err) {
-			conditions.MarkFalse(clusterScope.AzureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, infrav1.LoadBalancerProvisioningReason, clusterv1.ConditionSeverityWarning, err.Error())
+			conditions.MarkFalse(clusterScope.AzureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, infrav1.LoadBalancerProvisioningReason, clusterv1.ConditionSeverityWarning, "%s", err.Error())
 			return false, err
 		}
 	}
@@ -342,7 +342,7 @@ func (r *AzureStackHCIClusterReconciler) reconcileAzureStackHCILoadBalancer(clus
 	// Wait for the load balancer to be fully provisioned
 	if conditions.IsFalse(azureStackHCILoadBalancer, infrav1.LoadBalancerInfrastructureReadyCondition) {
 		cond := conditions.Get(azureStackHCILoadBalancer, infrav1.LoadBalancerInfrastructureReadyCondition)
-		conditions.MarkFalse(clusterScope.AzureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, cond.Reason, cond.Severity, cond.Message)
+		conditions.MarkFalse(clusterScope.AzureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, cond.Reason, cond.Severity, "%s", cond.Message)
 		return false, nil
 	}
 
@@ -381,7 +381,7 @@ func (r *AzureStackHCIClusterReconciler) reconcileDeleteAzureStackHCILoadBalance
 		infrav1util.CopyCorrelationID(clusterScope.AzureStackHCICluster, azureStackHCILoadBalancer)
 		if err := r.Client.Update(clusterScope.Context, azureStackHCILoadBalancer); err != nil {
 			if !apierrors.IsNotFound(err) {
-				conditions.MarkFalse(clusterScope.AzureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, clusterv1.DeletionFailedReason, clusterv1.ConditionSeverityWarning, err.Error())
+				conditions.MarkFalse(clusterScope.AzureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, clusterv1.DeletionFailedReason, clusterv1.ConditionSeverityWarning, "%s", err.Error())
 				return errors.Wrapf(err, "Failed to update AzureStackHCILoadBalancer %s", azureStackHCILoadBalancerName)
 			}
 		}
@@ -396,7 +396,7 @@ func (r *AzureStackHCIClusterReconciler) reconcileDeleteAzureStackHCILoadBalance
 			err)
 		if err != nil {
 			if !apierrors.IsNotFound(err) {
-				conditions.MarkFalse(clusterScope.AzureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, clusterv1.DeletionFailedReason, clusterv1.ConditionSeverityWarning, err.Error())
+				conditions.MarkFalse(clusterScope.AzureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, clusterv1.DeletionFailedReason, clusterv1.ConditionSeverityWarning, "%s", err.Error())
 				return errors.Wrapf(err, "Failed to delete AzureStackHCILoadBalancer %s", azureStackHCILoadBalancerName)
 			}
 		}
