@@ -157,11 +157,11 @@ func (r *AzureStackHCIClusterReconciler) reconcileNormal(clusterScope *scope.Clu
 	if err != nil {
 		switch mocerrors.GetErrorCode(err) {
 		case mocerrors.OutOfMemory.Error():
-			conditions.MarkFalse(azureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, infrav1.OutOfMemoryReason, clusterv1.ConditionSeverityError, err.Error())
+			conditions.MarkFalse(azureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, infrav1.OutOfMemoryReason, clusterv1.ConditionSeverityError, "%s", err.Error())
 		case mocerrors.OutOfCapacity.Error():
-			conditions.MarkFalse(azureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, infrav1.OutOfCapacityReason, clusterv1.ConditionSeverityError, err.Error())
+			conditions.MarkFalse(azureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, infrav1.OutOfCapacityReason, clusterv1.ConditionSeverityError, "%s", err.Error())
 		default:
-			conditions.MarkFalse(azureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, infrav1.ClusterReconciliationFailedReason, clusterv1.ConditionSeverityError, err.Error())
+			conditions.MarkFalse(azureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, infrav1.ClusterReconciliationFailedReason, clusterv1.ConditionSeverityError, "%s", err.Error())
 		}
 
 		wrappedErr := errors.Wrap(err, "failed to reconcile cluster services")
@@ -200,7 +200,7 @@ func (r *AzureStackHCIClusterReconciler) reconcileDelete(clusterScope *scope.Clu
 	if err != nil {
 		wrappedErr := errors.Wrapf(err, "unable to list AzureStackHCIMachines part of AzureStackHCIClusters %s/%s", clusterScope.AzureStackHCICluster.Namespace, clusterScope.AzureStackHCICluster.Name)
 		r.Recorder.Eventf(azureStackHCICluster, corev1.EventTypeWarning, "FailureListMachinesInCluster", wrappedErr.Error())
-		conditions.MarkFalse(azureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, clusterv1.DeletionFailedReason, clusterv1.ConditionSeverityWarning, err.Error())
+		conditions.MarkFalse(azureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, clusterv1.DeletionFailedReason, clusterv1.ConditionSeverityWarning, "%s", err.Error())
 		return reconcile.Result{}, wrappedErr
 	}
 
@@ -210,7 +210,7 @@ func (r *AzureStackHCIClusterReconciler) reconcileDelete(clusterScope *scope.Clu
 		if err != nil {
 			wrappedErr := errors.Wrapf(err, "failed to delete orphaned AzureStackHCIMachines part of AzureStackHCIClusters %s/%s", clusterScope.AzureStackHCICluster.Namespace, clusterScope.AzureStackHCICluster.Name)
 			r.Recorder.Eventf(azureStackHCICluster, corev1.EventTypeWarning, "FailureListMachinesInCluster", wrappedErr.Error())
-			conditions.MarkFalse(azureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, clusterv1.DeletionFailedReason, clusterv1.ConditionSeverityWarning, err.Error())
+			conditions.MarkFalse(azureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, clusterv1.DeletionFailedReason, clusterv1.ConditionSeverityWarning, "%s", err.Error())
 			return reconcile.Result{}, wrappedErr
 		}
 
@@ -240,7 +240,7 @@ func (r *AzureStackHCIClusterReconciler) reconcileDelete(clusterScope *scope.Clu
 	if err := newAzureStackHCIClusterReconciler(clusterScope).Delete(); err != nil {
 		wrappedErr := errors.Wrapf(err, "error deleting AzureStackHCICluster %s/%s", azureStackHCICluster.Namespace, azureStackHCICluster.Name)
 		r.Recorder.Eventf(azureStackHCICluster, corev1.EventTypeWarning, "FailureClusterDelete", wrappedErr.Error())
-		conditions.MarkFalse(azureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, clusterv1.DeletionFailedReason, clusterv1.ConditionSeverityWarning, err.Error())
+		conditions.MarkFalse(azureStackHCICluster, infrav1.NetworkInfrastructureReadyCondition, clusterv1.DeletionFailedReason, clusterv1.ConditionSeverityWarning, "%s", err.Error())
 		return reconcile.Result{}, wrappedErr
 	}
 

@@ -225,7 +225,7 @@ func (s *Service) SyncNicIPClaim(ctx context.Context, mocNic network.Interface) 
 func (s *Service) DeleteNicIPClaim(ctx context.Context, nicSpec *Spec) error {
 	telemetry.WriteMocInfoLog(ctx, s.Scope)
 	var errMsgs string
-	for index, _ := range nicSpec.IPConfigurations {
+	for index := range nicSpec.IPConfigurations {
 		claimName := s.IPAMService.GenerateIPClaimName(nicSpec.Name, index)
 		if err := s.IPAMService.DeleteIPClaim(ctx, claimName); err != nil {
 			s.Scope.GetLogger().Info("Failed to delete IPClaim during reconcile", "error", err)
