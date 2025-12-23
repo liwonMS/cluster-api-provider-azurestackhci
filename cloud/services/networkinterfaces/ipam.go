@@ -23,14 +23,14 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/microsoft/moc-sdk-for-go/services/network"
+	"github.com/microsoft/moc-sdk-for-go/services/network/virtualnetwork"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/cluster-api/exp/ipam/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"github.com/microsoft/moc-sdk-for-go/services/network/virtualnetwork"
-	"github.com/microsoft/moc-sdk-for-go/services/network"
 
 	"github.com/microsoft/cluster-api-provider-azurestackhci/cloud/scope"
 	corev1 "k8s.io/api/core/v1"
@@ -76,11 +76,11 @@ const (
 
 // IPAMService provides functionality to manage IPAddressClaim CRs for network interfaces
 type IPAMService struct {
-	client  client.Client
-	logger  logr.Logger
-	vmMeta  VmMeta
-	nicSpec NicSpec
-	vnetsClient  virtualnetwork.VirtualNetworkClient
+	client      client.Client
+	logger      logr.Logger
+	vmMeta      VmMeta
+	nicSpec     NicSpec
+	vnetsClient virtualnetwork.VirtualNetworkClient
 }
 
 type VmMeta struct {
@@ -120,19 +120,19 @@ func NewIPAMHelper(vmscope *scope.VirtualMachineScope) *IPAMService {
 // IPAM service specifically applies to lnets created by Arc VM extension,
 // which corresponds to MOC Default_Group resource group.
 func (h *IPAMService) IsIPAMEnabledForVnet(ctx context.Context) bool {
-    vnets, err := h.vnetsClient.Get(ctx, ArcVMLnetMocResourceGroup, h.nicSpec.vnetName)
-    if err != nil || vnets == nil || len(*vnets) == 0{
-        h.logger.Error(err, "Failed to get VNet from MOC", "vnetName", h.nicSpec.vnetName)
-        return false
-    }
+	vnets, err := h.vnetsClient.Get(ctx, ArcVMLnetMocResourceGroup, h.nicSpec.vnetName)
+	if err != nil || vnets == nil || len(*vnets) == 0 {
+		h.logger.Error(err, "Failed to get VNet from MOC", "vnetName", h.nicSpec.vnetName)
+		return false
+	}
 
-    vnet := (*vnets)[0]
-    if vnet.VirtualNetworkPropertiesFormat == nil || 
-		vnet.VirtualNetworkPropertiesFormat.Subnets == nil  || 
+	vnet := (*vnets)[0]
+	if vnet.VirtualNetworkPropertiesFormat == nil ||
+		vnet.VirtualNetworkPropertiesFormat.Subnets == nil ||
 		len(*vnet.VirtualNetworkPropertiesFormat.Subnets) == 0 {
-        h.logger.Info("VNet has no subnets, skipping IPAM", "vnetName", h.nicSpec.vnetName)
-        return false
-    }
+		h.logger.Info("VNet has no subnets, skipping IPAM", "vnetName", h.nicSpec.vnetName)
+		return false
+	}
 
 	// Check if the first subnet is configured for static IP allocation
 	firstSubnet := (*vnet.VirtualNetworkPropertiesFormat.Subnets)[0]
@@ -143,9 +143,9 @@ func (h *IPAMService) IsIPAMEnabledForVnet(ctx context.Context) bool {
 		return false
 	}
 
-    h.logger.Info("VNet configured for Static IP allocation, proceeding with IPAM",
-        "vnetName", h.nicSpec.vnetName)
-    return true
+	h.logger.Info("VNet configured for Static IP allocation, proceeding with IPAM",
+		"vnetName", h.nicSpec.vnetName)
+	return true
 }
 
 // AllocateIP tries to allocate a private IP for the given NIC using IPAM.
@@ -164,8 +164,8 @@ func (h *IPAMService) AllocateIPClaim(ctx context.Context, claimName, staticIPAd
 	allocatedIP, err := h.waitForIPAllocation(ctx, logger, claimName)
 	if err != nil {
 		return "", fmt.Errorf("Could not get IP from IPAllocation: %w", err)
-	} 
-	
+	}
+
 	return allocatedIP, nil
 }
 
@@ -196,10 +196,6 @@ func (h *IPAMService) SyncIPClaim(ctx context.Context, claimName, mocAllocatedIP
 		return nil // No IP to sync
 	}
 
-	if enabled := h.IsIPAMEnabledForVnet(ctx); !enabled {
-		return nil
-	}
-
 	logger := h.logger.WithValues("IPAllocationSync", h.vmMeta.vmName, "claimName", claimName)
 
 	// Use timeout for sync operations
@@ -220,13 +216,18 @@ func (h *IPAMService) SyncIPClaim(ctx context.Context, claimName, mocAllocatedIP
 		logger.Info("IPAllocation CR already exists", "crName", claimName)
 		if _, err := h.VerifyAllocatedIP(ctx, claimName, mocAllocatedIP); err == nil {
 			return nil
-		} 
-		
+		}
+
 		logger.Info("Allocated IP does not match expected MOC IP, recreating IPAllocation CR", "expectedIP", mocAllocatedIP)
 		// Delete existing CR to recreate
 		if delErr := h.client.Delete(syncCtx, ipAllocation); delErr != nil {
 			return fmt.Errorf("failed to delete mismatched IPAllocation CR: %w", delErr)
 		}
+	}
+
+	// only check with moc if necessary as the call is expensive.
+	if enabled := h.IsIPAMEnabledForVnet(ctx); !enabled {
+		return nil
 	}
 
 	if _, err = h.createIPClaim(ctx, logger, claimName, mocAllocatedIP); err != nil {

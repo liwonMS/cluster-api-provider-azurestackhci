@@ -59,8 +59,8 @@ func newAzureStackHCIVirtualMachineService(vmScope *scope.VirtualMachineScope) *
 	}
 }
 
-// Create creates machine if and only if machine exists, handled by cluster-api
-func (s *azureStackHCIVirtualMachineService) Create() (*infrav1.VM, error) {
+// ReconcileNics reconciles the network interfaces for a VM
+func (s *azureStackHCIVirtualMachineService) ReconcileNics() (string, error) {
 	nicName := azurestackhci.GenerateNICName(s.vmScope.Name())
 
 	var ipconfigs networkinterfaces.IPConfigurations
@@ -83,7 +83,17 @@ func (s *azureStackHCIVirtualMachineService) Create() (*infrav1.VM, error) {
 
 	nicErr := s.reconcileNetworkInterface(nicName, ipconfigs)
 	if nicErr != nil {
-		return nil, errors.Wrapf(nicErr, "failed to create nic %s for machine %s", nicName, s.vmScope.Name())
+		return "", errors.Wrapf(nicErr, "failed to create nic %s for machine %s", nicName, s.vmScope.Name())
+	}
+
+	return nicName, nil
+}
+
+// Create creates machine if and only if machine exists, handled by cluster-api
+func (s *azureStackHCIVirtualMachineService) Create() (*infrav1.VM, error) {
+	nicName, err := s.ReconcileNics()
+	if err != nil {
+		return nil, err
 	}
 
 	vm, vmErr := s.createVirtualMachine(nicName)

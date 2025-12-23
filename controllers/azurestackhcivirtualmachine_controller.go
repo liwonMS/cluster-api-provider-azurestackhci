@@ -230,13 +230,14 @@ func (r *AzureStackHCIVirtualMachineReconciler) getOrCreate(virtualMachineScope 
 			return nil, wrappedErr
 		}
 		r.Recorder.Eventf(virtualMachineScope.AzureStackHCIVirtualMachine, corev1.EventTypeNormal, "SuccessfulCreateVM", "Success creating AzureStackHCIVirtualMachine %s/%s", virtualMachineScope.Namespace(), virtualMachineScope.Name())
-	}
-
-	// calling this here to ensure nic ip claims are created for existing vms as well, this is needed for
-	// brownfield scenarios where VMs already exist when we introduce IPAM
-	_, err = ams.ReconcileNics()
-	if err != nil {
-		return nil, err
+	} else {
+		// calling this here to ensure nic ip claims are created for existing vms as well, this is needed for
+		// brownfield scenarios where VMs already exist when we introduce IPAM
+		virtualMachineScope.Info("VM found, reconciling existing VM for Nics", "Name", virtualMachineScope.Name())
+		_, err = ams.ReconcileNics()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return vm, nil
