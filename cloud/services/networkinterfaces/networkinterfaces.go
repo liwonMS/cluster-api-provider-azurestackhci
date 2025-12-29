@@ -71,6 +71,7 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 	if nic, err := s.Get(ctx, nicSpec); err == nil {
 		// Nic already exists, no update supported for now
 		// Sync back to IPAM to ensure claim exists
+		s.Scope.GetLogger().Info("Nic exists, attempting to sync IPClaim", "name", nicSpec.Name)
 		mocNic := nic.(network.Interface)
 		if err := s.SyncNicIPClaim(ctx, mocNic); err != nil {
 			s.Scope.GetLogger().Info("Failed to sync IPClaim during reconcile", "error", err)

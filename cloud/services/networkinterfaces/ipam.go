@@ -58,12 +58,14 @@ const (
 	IPAMPollInterval = 500 * time.Millisecond
 
 	// Annotations for tracking IPClaim source and ownership
-	AnnotationCreatedBy        = AzstackhciAPIGroup + "/created-by"
-	AnnotationStaticIP         = AzstackhciAPIGroup + "/static-ip"
-	AnnotationCreatedByCAPA    = AzstackhciAPIGroup + "/created-by-capa"
+	AnnotationCreatedBy     = AzstackhciAPIGroup + "/created-by"
+	AnnotationCreatedByCAPH = "caph"
+
+	AnnotationStaticIP         = "ipam." + AzstackhciAPIGroup + "/requested-ip"
 	AnnotationAllocationSource = AzstackhciAPIGroup + "/allocation-source"
-	AllocationSourceIPAM       = "IPAM"
-	AllocationSourceMOC        = "MOC"
+
+	AllocationSourceIPAM = "IPAM"
+	AllocationSourceMOC  = "MOC"
 )
 
 type IPAddressAllocationSource string
@@ -119,6 +121,7 @@ func NewIPAMHelper(vmscope *scope.VirtualMachineScope) *IPAMService {
 // Returns true if IPAM should be used, false otherwise.
 // IPAM service specifically applies to lnets created by Arc VM extension,
 // which corresponds to MOC Default_Group resource group.
+// the function can be replaced by passing down vnet properties through capi in the future.
 func (h *IPAMService) IsIPAMEnabledForVnet(ctx context.Context) bool {
 	vnets, err := h.vnetsClient.Get(ctx, ArcVMLnetMocResourceGroup, h.nicSpec.vnetName)
 	if err != nil || vnets == nil || len(*vnets) == 0 {
@@ -189,6 +192,35 @@ func (h *IPAMService) DeleteIPClaim(ctx context.Context, claimName string) error
 	return nil
 }
 
+func (h *IPAMService) deleteIPClaimAndWait(ctx context.Context, claimName string) error {
+	if err := h.DeleteIPClaim(ctx, claimName); err != nil {
+		return err
+	}
+
+    ticker := time.NewTicker(IPAMPollInterval)
+    defer ticker.Stop()
+    
+    namespacedName := types.NamespacedName{Name: claimName, Namespace: h.vmMeta.namespace}
+    
+    for {
+        claim := &v1beta1.IPAddressClaim{}
+        err := h.client.Get(ctx, namespacedName, claim)
+        if apierrors.IsNotFound(err) {
+            return nil // Deletion complete
+        }
+        if err != nil {
+            return err
+        }
+        
+        select {
+        case <-ctx.Done():
+            return ctx.Err()
+        case <-ticker.C:
+            // Continue polling
+        }
+    }
+}
+
 // SyncIPClaimAfterMOC creates IPClaim with MOC-allocated IP for tracking purposes
 // This is best-effort and non-blocking, non-waiting, allocation status is not checked.
 func (h *IPAMService) SyncIPClaim(ctx context.Context, claimName, mocAllocatedIP string) error {
@@ -203,8 +235,8 @@ func (h *IPAMService) SyncIPClaim(ctx context.Context, claimName, mocAllocatedIP
 	defer cancel()
 
 	// Check if IPAllocation CR already exists
-	ipAllocation := &v1beta1.IPAddressClaim{}
-	err := h.client.Get(syncCtx, types.NamespacedName{Name: claimName, Namespace: h.vmMeta.namespace}, ipAllocation)
+	ipClaim := &v1beta1.IPAddressClaim{}
+	err := h.client.Get(syncCtx, types.NamespacedName{Name: claimName, Namespace: h.vmMeta.namespace}, ipClaim)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.Info("IPAllocation is not found, creating new one", "crName", claimName)
@@ -213,16 +245,16 @@ func (h *IPAMService) SyncIPClaim(ctx context.Context, claimName, mocAllocatedIP
 			return fmt.Errorf("failed to verify IPAllocation CR: %w", err)
 		}
 	} else {
-		logger.Info("IPAllocation CR already exists", "crName", claimName)
-		if _, err := h.VerifyAllocatedIP(ctx, claimName, mocAllocatedIP); err == nil {
-			return nil
-		}
-
-		logger.Info("Allocated IP does not match expected MOC IP, recreating IPAllocation CR", "expectedIP", mocAllocatedIP)
-		// Delete existing CR to recreate
-		if delErr := h.client.Delete(syncCtx, ipAllocation); delErr != nil {
-			return fmt.Errorf("failed to delete mismatched IPAllocation CR: %w", delErr)
-		}
+		logger.Info("IPAllocation CR already exists, verifying against IP", "crName", claimName, "expectedIP", mocAllocatedIP)
+		if err := h.verifyAllocatedIP(ctx, ipClaim, mocAllocatedIP); err != nil {
+			logger.Info("Allocated IP does not match expected MOC IP, recreating IPAllocation CR", "err", err.Error())
+			// Delete existing CR to recreate
+			if delErr := h.deleteIPClaimAndWait(syncCtx, claimName); delErr != nil {
+				return fmt.Errorf("failed to delete mismatched IPAllocation CR: %w", delErr)
+			}
+		} else {
+			return nil // IP matches, nothing to do
+		}		
 	}
 
 	// only check with moc if necessary as the call is expensive.
@@ -239,17 +271,12 @@ func (h *IPAMService) SyncIPClaim(ctx context.Context, claimName, mocAllocatedIP
 }
 
 // VerifyAllocatedIP checks if the IPAddress in the IPClaim matches the expected IP
-func (h *IPAMService) VerifyAllocatedIP(ctx context.Context, claimName, expectedIP string) (bool, error) {
+func (h *IPAMService) verifyAllocatedIP(ctx context.Context, claim *v1beta1.IPAddressClaim, expectedIP string) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, IPAMTimeout)
 	defer cancel()
 
-	claim := &v1beta1.IPAddressClaim{}
-	if err := h.client.Get(timeoutCtx, types.NamespacedName{Name: claimName, Namespace: h.vmMeta.namespace}, claim); err != nil {
-		return false, fmt.Errorf("failed to get IPClaim %s: %w", claimName, err)
-	}
-
 	if claim.Status.AddressRef.Name == "" {
-		return false, fmt.Errorf("IPClaim %s has no allocated address", claimName)
+		return fmt.Errorf("IPClaim %s has no allocated address", claim.Name)
 	}
 
 	ipAddr := &v1beta1.IPAddress{}
@@ -259,14 +286,14 @@ func (h *IPAMService) VerifyAllocatedIP(ctx context.Context, claimName, expected
 	}
 
 	if err := h.client.Get(timeoutCtx, ipNamespacedName, ipAddr); err != nil {
-		return false, fmt.Errorf("failed to get IPAddress %s: %w", claim.Status.AddressRef.Name, err)
+		return fmt.Errorf("failed to get IPAddress %s: %w", claim.Status.AddressRef.Name, err)
 	}
 
 	if ipAddr.Spec.Address != expectedIP {
-		return false, nil // IP does not match
+		return fmt.Errorf("IPClaim %s has mismatched IP: expected %s, got %s", claim.Name, expectedIP, ipAddr.Spec.Address)
 	}
 
-	return true, nil // IP matches
+	return nil // IP matches
 }
 
 // createIPClaim creates IPAddressClaim for static IP allocation with proper owner references
@@ -287,7 +314,7 @@ func (h *IPAMService) createIPClaim(ctx context.Context, logger logr.Logger, cla
 			Name:      claimName,
 			Namespace: h.vmMeta.namespace,
 			Annotations: map[string]string{
-				AnnotationCreatedBy:        AnnotationCreatedByCAPA,
+				AnnotationCreatedBy:        AnnotationCreatedByCAPH,
 				AnnotationAllocationSource: AllocationSourceIPAM,
 				AnnotationStaticIP:         ip,
 			},
@@ -380,5 +407,5 @@ func (h *IPAMService) GenerateIPClaimName(nicName string, index int) string {
 // resolvePoolName maps VNet/Subnet to IPPool name based on naming convention
 func (h *IPAMService) resolvePoolName() string {
 	// This follows the naming convention from azstackhci-operator
-	return fmt.Sprintf("ippool-%s-0", h.nicSpec.vnetName)
+	return fmt.Sprintf("ippool-%s-%s-0", h.nicSpec.vnetName, h.nicSpec.subnetName)
 }
