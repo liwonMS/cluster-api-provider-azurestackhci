@@ -19,12 +19,15 @@ package networkinterfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Azure/go-autorest/autorest/to"
 	azurestackhci "github.com/microsoft/cluster-api-provider-azurestackhci/cloud"
 	"github.com/microsoft/cluster-api-provider-azurestackhci/cloud/telemetry"
 	"github.com/microsoft/moc-sdk-for-go/services/network"
+	mocerrors "github.com/microsoft/moc/pkg/errors"
 	"github.com/pkg/errors"
+	"go.uber.org/multierr"
 )
 
 // Spec specification for ip configuration
@@ -148,11 +151,54 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 	telemetry.WriteMocOperationLog(s.Scope.GetLogger(), telemetry.CreateOrUpdate, s.Scope.GetCustomResourceTypeWithName(), telemetry.NetworkInterface,
 		telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), nicSpec.Name), &networkInterface, err)
 	if err != nil {
+		if s.shouldRetryIfIPConflict(err, nicSpec) {
+			if err := s.handleIPAddressConflictRetry(ctx, nicSpec, &networkInterface); err != nil {
+				return err
+			}
+			logger.Info("successfully created network interface ", "name", nicSpec.Name)
+			return nil
+		}
 		return errors.Wrapf(err, "failed to create network interface %s in resource group %s", nicSpec.Name, s.Scope.GetResourceGroup())
 	}
 
 	logger.Info("successfully created network interface ", "name", nicSpec.Name)
 	return err
+}
+
+// isIPConflictError checks if the error indicates an IP address conflict that should trigger a retry
+func (s *Service) shouldRetryIfIPConflict(err error, nicSpec *Spec) bool {
+	// user specified static IP, no need to retry
+	if err == nil || nicSpec.StaticIPAddress != "" {
+		return false
+	}
+
+	// Check for the specific error pattern indicating IP address conflict
+	return mocerrors.IsAlreadySet(err)
+}
+
+func (s *Service) handleIPAddressConflictRetry(ctx context.Context, vnicSpec *Spec, networkInterface *network.Interface) error {
+	logger := s.Scope.GetLogger()
+	logger.Info("IP allocated by IPAM is already taken in Moc, retrying", "IP", (*networkInterface.IPConfigurations)[0].InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress)
+
+	// Remove the failed mocnetworkinterface
+	if err := s.Delete(ctx, vnicSpec); err != nil {
+		return err
+	}
+
+	for _, ipconfig := range *networkInterface.IPConfigurations {
+		ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress = nil
+	}
+
+	// Recreate the mocnetworkinterface without the IPAM allocated IP
+	_, err := s.Client.CreateOrUpdate(ctx,
+		s.Scope.GetResourceGroup(),
+		vnicSpec.Name,
+		networkInterface)
+
+	telemetry.WriteMocOperationLog(s.Scope.GetLogger(), telemetry.CreateOrUpdate, s.Scope.GetCustomResourceTypeWithName(), telemetry.NetworkInterface,
+		telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), vnicSpec.Name), &networkInterface, err)
+
+	return nil
 }
 
 // Delete deletes the network interface with the provided name.
@@ -164,78 +210,113 @@ func (s *Service) Delete(ctx context.Context, spec interface{}) error {
 	}
 	logger := s.Scope.GetLogger()
 	logger.Info("deleting nic", "name", nicSpec.Name)
+	defer func() {
+		if err := s.DeleteNicIPClaim(ctx, nicSpec); err != nil {
+			logger.Error(err, "failed to delete IPAM claim for nic", nicSpec.Name)
+		}
+	}()
+
 	err := s.Client.Delete(ctx, s.Scope.GetResourceGroup(), nicSpec.Name)
 	telemetry.WriteMocOperationLog(logger, telemetry.Delete, s.Scope.GetCustomResourceTypeWithName(), telemetry.NetworkInterface,
 		telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), nicSpec.Name), nil, err)
 	if err != nil && azurestackhci.ResourceNotFound(err) {
-		// already deleted
-		if err = s.DeleteNicIPClaim(ctx, nicSpec); err != nil {
-			logger.Error(err, "failed to delete IPAM claim for nic", nicSpec.Name)
-		}
 		return nil
 	}
 	if err != nil {
 		return errors.Wrapf(err, "failed to delete network interface %s in resource group %s", nicSpec.Name, s.Scope.GetResourceGroup())
 	}
 
-	if err = s.DeleteNicIPClaim(ctx, nicSpec); err != nil {
-		logger.Error(err, "failed to delete IPAM claim for nic", nicSpec.Name)
+	err = s.EnsureNicDeleted(ctx, nicSpec)
+	if err != nil {
+		return errors.Wrapf(err, "timed out waiting for deletion of network interface %s in resource group %s", nicSpec.Name, s.Scope.GetResourceGroup())
 	}
 
 	logger.Info("successfully deleted nic", "name", nicSpec.Name)
 	return err
 }
 
-func (s *Service) AllocateNicIPClaim(ctx context.Context, mocNic network.Interface, staticIPAddress string) error {
+// EnsureNicDeleted ensures the network interface is deleted by polling Get with a 5 second timeout.
+func (s *Service) EnsureNicDeleted(ctx context.Context, nicSpec *Spec) error {
 	telemetry.WriteMocInfoLog(ctx, s.Scope)
-	var errMsgs string
+	logger := s.Scope.GetLogger()
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			return errors.Wrap(timeoutCtx.Err(), "timeout waiting for nic deletion")
+		case <-ticker.C:
+			_, err := s.Get(ctx, nicSpec)
+			if err != nil {
+				if azurestackhci.ResourceNotFound(err) {
+					logger.Info("nic not found", "name", nicSpec.Name)
+					return nil
+				}
+				logger.Error(err, "failed to get nic", "name", nicSpec.Name)
+				return err
+			}
+			logger.Info("nic still exists, waiting for deletion", "name", nicSpec.Name)
+		}
+	}
+}
+
+func (s *Service) AllocateNicIPClaim(ctx context.Context, mocNic network.Interface, staticIPAddress string) error {
+	logger := s.Scope.GetLogger()
+
+	var errs error
 	for index, ipconfig := range *mocNic.IPConfigurations {
 		claimName := s.IPAMService.GenerateIPClaimName(*mocNic.Name, index)
 		allocatedIP, err := s.IPAMService.AllocateIPClaim(ctx, claimName, staticIPAddress)
+		telemetry.WriteMocOperationLog(logger, telemetry.Create, s.Scope.GetCustomResourceTypeWithName(), telemetry.IPAddressClaim,
+			telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), claimName), nil, err)
 		if err != nil {
 			s.Scope.GetLogger().Info("Failed to allocate IPClaim during reconcile", "error", err)
-			errMsgs += err.Error() + "; "
+			multierr.Append(errs, err)
 		} else {
 			ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress = to.StringPtr(allocatedIP)
 		}
 	}
 
-	if errMsgs != "" {
-		return errors.New(errMsgs)
-	}
-	return nil
+	return errs
 }
 
 func (s *Service) SyncNicIPClaim(ctx context.Context, mocNic network.Interface) error {
-	telemetry.WriteMocInfoLog(ctx, s.Scope)
-	var errMsgs string
+	logger := s.Scope.GetLogger()
+
+	var errs error
 	for index, ipconfig := range *mocNic.IPConfigurations {
 		claimName := s.IPAMService.GenerateIPClaimName(*mocNic.Name, index)
-		if err := s.IPAMService.SyncIPClaim(ctx, claimName, *(ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress)); err != nil {
+		err := s.IPAMService.SyncIPClaim(ctx, claimName, *(ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress))
+		telemetry.WriteMocOperationLog(logger, telemetry.Create, s.Scope.GetCustomResourceTypeWithName(), telemetry.IPAddressClaim,
+			telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), claimName), nil, err)
+		if err != nil {
 			s.Scope.GetLogger().Info("Failed to sync IPClaim during reconcile", "error", err)
-			errMsgs += err.Error() + "; "
+			multierr.Append(errs, err)
 		}
 	}
 
-	if errMsgs != "" {
-		return errors.New(errMsgs)
-	}
-	return nil
+	return errs
 }
 
 func (s *Service) DeleteNicIPClaim(ctx context.Context, nicSpec *Spec) error {
-	telemetry.WriteMocInfoLog(ctx, s.Scope)
-	var errMsgs string
+	logger := s.Scope.GetLogger()
+
+	var errs error
 	for index := range nicSpec.IPConfigurations {
 		claimName := s.IPAMService.GenerateIPClaimName(nicSpec.Name, index)
-		if err := s.IPAMService.DeleteIPClaim(ctx, claimName); err != nil {
+		err := s.IPAMService.DeleteIPClaim(ctx, claimName)
+		telemetry.WriteMocOperationLog(logger, telemetry.Delete, s.Scope.GetCustomResourceTypeWithName(), telemetry.IPAddressClaim,
+			telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), claimName), nil, err)
+		if err != nil {
 			s.Scope.GetLogger().Info("Failed to delete IPClaim during reconcile", "error", err)
-			errMsgs += err.Error() + "; "
+			multierr.Append(errs, err)
 		}
 	}
 
-	if errMsgs != "" {
-		return errors.New(errMsgs)
-	}
-	return nil
+	return errs
 }
