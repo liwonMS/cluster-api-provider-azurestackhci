@@ -53,7 +53,7 @@ type azureStackHCIVirtualMachineService struct {
 func newAzureStackHCIVirtualMachineService(vmScope *scope.VirtualMachineScope) *azureStackHCIVirtualMachineService {
 	return &azureStackHCIVirtualMachineService{
 		vmScope:              vmScope,
-		networkInterfacesSvc: networkinterfaces.NewService(vmScope, networkinterfaces.NewIPAMHelper(vmScope)),
+		networkInterfacesSvc: networkinterfaces.NewService(vmScope, networkinterfaces.NewIPAMService(vmScope)),
 		virtualMachinesSvc:   virtualmachines.NewService(vmScope),
 		disksSvc:             disks.NewService(vmScope),
 	}

@@ -28,6 +28,7 @@ import (
 	mocerrors "github.com/microsoft/moc/pkg/errors"
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // Spec specification for ip configuration
@@ -155,6 +156,7 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 			if err := s.handleIPAddressConflictRetry(ctx, nicSpec, &networkInterface); err != nil {
 				return err
 			}
+			
 			logger.Info("successfully created network interface ", "name", nicSpec.Name)
 			return nil
 		}
@@ -168,7 +170,7 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 // isIPConflictError checks if the error indicates an IP address conflict that should trigger a retry
 func (s *Service) shouldRetryIfIPConflict(err error, nicSpec *Spec) bool {
 	// user specified static IP, no need to retry
-	if err == nil || nicSpec.StaticIPAddress != ""{
+	if err == nil || nicSpec.StaticIPAddress != "" {
 		return false
 	}
 
@@ -198,9 +200,8 @@ func (s *Service) handleIPAddressConflictRetry(ctx context.Context, vnicSpec *Sp
 	telemetry.WriteMocOperationLog(s.Scope.GetLogger(), telemetry.CreateOrUpdate, s.Scope.GetCustomResourceTypeWithName(), telemetry.NetworkInterface,
 		telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), vnicSpec.Name), &networkInterface, err)
 
-	return nil
+	return err
 }
-
 
 // Delete deletes the network interface with the provided name.
 func (s *Service) Delete(ctx context.Context, spec interface{}) error {
@@ -211,7 +212,7 @@ func (s *Service) Delete(ctx context.Context, spec interface{}) error {
 	}
 	logger := s.Scope.GetLogger()
 	logger.Info("deleting nic", "name", nicSpec.Name)
-	defer func () {
+	defer func() {
 		if err := s.DeleteNicIPClaim(ctx, nicSpec); err != nil {
 			logger.Error(err, "failed to delete IPAM claim for nic", nicSpec.Name)
 		}
@@ -227,7 +228,7 @@ func (s *Service) Delete(ctx context.Context, spec interface{}) error {
 		return errors.Wrapf(err, "failed to delete network interface %s in resource group %s", nicSpec.Name, s.Scope.GetResourceGroup())
 	}
 
-	err = s.EnsureNicDeleted(ctx, nicSpec)
+	err = s.ensureNicDeleted(ctx, nicSpec)
 	if err != nil {
 		return errors.Wrapf(err, "timed out waiting for deletion of network interface %s in resource group %s", nicSpec.Name, s.Scope.GetResourceGroup())
 	}
@@ -236,41 +237,36 @@ func (s *Service) Delete(ctx context.Context, spec interface{}) error {
 	return err
 }
 
-// EnsureNicDeleted ensures the network interface is deleted by polling Get with a 5 second timeout.
-func (s *Service) EnsureNicDeleted(ctx context.Context, nicSpec *Spec) error {
-	telemetry.WriteMocInfoLog(ctx, s.Scope)
+// ensureNicDeleted ensures the network interface is deleted by polling Get with a 5 second timeout.
+func (s *Service) ensureNicDeleted(ctx context.Context, nicSpec *Spec) error {
 	logger := s.Scope.GetLogger()
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-timeoutCtx.Done():
-			return errors.Wrap(timeoutCtx.Err(), "timeout waiting for nic deletion")
-		case <-ticker.C:
-			_, err := s.Get(ctx, nicSpec)
-			if err != nil {
-				if azurestackhci.ResourceNotFound(err) {
-					logger.Info("nic not found", "name", nicSpec.Name)
-					return nil
-				}
-				logger.Error(err, "failed to get nic", "name", nicSpec.Name)
-				return err
+	pollErr := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		_, err := s.Get(ctx, nicSpec)
+		if err != nil {
+			if azurestackhci.ResourceNotFound(err) {
+				logger.Info("nic not found", "name", nicSpec.Name)
+				return true, nil // Deletion complete
 			}
-			logger.Info("nic still exists, waiting for deletion", "name", nicSpec.Name)
+			logger.Error(err, "failed to get nic", "name", nicSpec.Name)
+			return false, err
 		}
+		logger.Info("nic still exists, waiting for deletion", "name", nicSpec.Name)
+		return false, nil // Continue polling
+	})
+
+	if pollErr != nil {
+		return errors.Wrapf(pollErr, "failed waiting for nic %s to be deleted", nicSpec.Name)
 	}
+
+	return nil
 }
 
 func (s *Service) AllocateNicIPClaim(ctx context.Context, mocNic network.Interface, staticIPAddress string) error {
 	var errs error
 	for index, ipconfig := range *mocNic.IPConfigurations {
 		claimName := s.IPAMService.GenerateIPClaimName(*mocNic.Name, index)
-		if allocatedIP, err := s.IPAMService.AllocateIPClaim(ctx, claimName, staticIPAddress);err != nil {
+		if allocatedIP, err := s.IPAMService.AllocateIPClaim(ctx, claimName, staticIPAddress); err != nil {
 			s.Scope.GetLogger().Info("Failed to allocate IPClaim during reconcile", "error", err)
 			errs = multierr.Append(errs, err)
 		} else {
