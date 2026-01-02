@@ -168,7 +168,7 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 // isIPConflictError checks if the error indicates an IP address conflict that should trigger a retry
 func (s *Service) shouldRetryIfIPConflict(err error, nicSpec *Spec) bool {
 	// user specified static IP, no need to retry
-	if err == nil || nicSpec.StaticIPAddress != "" {
+	if err == nil || nicSpec.StaticIPAddress != ""{
 		return false
 	}
 
@@ -201,6 +201,7 @@ func (s *Service) handleIPAddressConflictRetry(ctx context.Context, vnicSpec *Sp
 	return nil
 }
 
+
 // Delete deletes the network interface with the provided name.
 func (s *Service) Delete(ctx context.Context, spec interface{}) error {
 	telemetry.WriteMocInfoLog(ctx, s.Scope)
@@ -210,7 +211,7 @@ func (s *Service) Delete(ctx context.Context, spec interface{}) error {
 	}
 	logger := s.Scope.GetLogger()
 	logger.Info("deleting nic", "name", nicSpec.Name)
-	defer func() {
+	defer func () {
 		if err := s.DeleteNicIPClaim(ctx, nicSpec); err != nil {
 			logger.Error(err, "failed to delete IPAM claim for nic", nicSpec.Name)
 		}
@@ -266,17 +267,12 @@ func (s *Service) EnsureNicDeleted(ctx context.Context, nicSpec *Spec) error {
 }
 
 func (s *Service) AllocateNicIPClaim(ctx context.Context, mocNic network.Interface, staticIPAddress string) error {
-	logger := s.Scope.GetLogger()
-
 	var errs error
 	for index, ipconfig := range *mocNic.IPConfigurations {
 		claimName := s.IPAMService.GenerateIPClaimName(*mocNic.Name, index)
-		allocatedIP, err := s.IPAMService.AllocateIPClaim(ctx, claimName, staticIPAddress)
-		telemetry.WriteMocOperationLog(logger, telemetry.Create, s.Scope.GetCustomResourceTypeWithName(), telemetry.IPAddressClaim,
-			telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), claimName), nil, err)
-		if err != nil {
+		if allocatedIP, err := s.IPAMService.AllocateIPClaim(ctx, claimName, staticIPAddress);err != nil {
 			s.Scope.GetLogger().Info("Failed to allocate IPClaim during reconcile", "error", err)
-			multierr.Append(errs, err)
+			errs = multierr.Append(errs, err)
 		} else {
 			ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress = to.StringPtr(allocatedIP)
 		}
@@ -286,17 +282,12 @@ func (s *Service) AllocateNicIPClaim(ctx context.Context, mocNic network.Interfa
 }
 
 func (s *Service) SyncNicIPClaim(ctx context.Context, mocNic network.Interface) error {
-	logger := s.Scope.GetLogger()
-
 	var errs error
 	for index, ipconfig := range *mocNic.IPConfigurations {
 		claimName := s.IPAMService.GenerateIPClaimName(*mocNic.Name, index)
-		err := s.IPAMService.SyncIPClaim(ctx, claimName, *(ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress))
-		telemetry.WriteMocOperationLog(logger, telemetry.Create, s.Scope.GetCustomResourceTypeWithName(), telemetry.IPAddressClaim,
-			telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), claimName), nil, err)
-		if err != nil {
+		if err := s.IPAMService.SyncIPClaim(ctx, claimName, *(ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress)); err != nil {
 			s.Scope.GetLogger().Info("Failed to sync IPClaim during reconcile", "error", err)
-			multierr.Append(errs, err)
+			errs = multierr.Append(errs, err)
 		}
 	}
 
@@ -304,17 +295,12 @@ func (s *Service) SyncNicIPClaim(ctx context.Context, mocNic network.Interface) 
 }
 
 func (s *Service) DeleteNicIPClaim(ctx context.Context, nicSpec *Spec) error {
-	logger := s.Scope.GetLogger()
-
 	var errs error
 	for index := range nicSpec.IPConfigurations {
 		claimName := s.IPAMService.GenerateIPClaimName(nicSpec.Name, index)
-		err := s.IPAMService.DeleteIPClaim(ctx, claimName)
-		telemetry.WriteMocOperationLog(logger, telemetry.Delete, s.Scope.GetCustomResourceTypeWithName(), telemetry.IPAddressClaim,
-			telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), claimName), nil, err)
-		if err != nil {
+		if err := s.IPAMService.DeleteIPClaim(ctx, claimName); err != nil {
 			s.Scope.GetLogger().Info("Failed to delete IPClaim during reconcile", "error", err)
-			multierr.Append(errs, err)
+			errs = multierr.Append(errs, err)
 		}
 	}
 
