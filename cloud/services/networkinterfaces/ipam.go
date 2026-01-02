@@ -26,6 +26,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/cluster-api/exp/ipam/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -56,7 +57,7 @@ const (
 	// IPAMTimeout is the timeout for IPAM operations to ensure quick decisions
 	IPAMTimeout = 5 * time.Second
 	// IPAMPollInterval is how often to check IPClaim status during allocation
-	IPAMPollInterval = 500 * time.Millisecond
+	IPAMPollInterval = 100 * time.Millisecond
 
 	// Annotations for tracking IPClaim source and ownership
 	AnnotationCreatedBy     = AzstackhciAPIGroup + "/created-by"
@@ -164,37 +165,38 @@ func (h *IPAMService) DeleteIPClaim(ctx context.Context, claimName string) (err 
 		return fmt.Errorf("failed to delete IPClaim %s: %w", claimName, err)
 	}
 
+	if err := h.ensureIPClaimDeleted(ctx, claimName); err != nil {
+		return err
+	}
+
 	h.logger.Info("Deleted IPClaim", "name", claimName)
 	return nil
 }
 
-func (h *IPAMService) deleteIPClaimAndWait(ctx context.Context, claimName string) error {
+func (h *IPAMService) ensureIPClaimDeleted(ctx context.Context, claimName string) error {
 	if err := h.DeleteIPClaim(ctx, claimName); err != nil {
 		return err
 	}
 
-	ticker := time.NewTicker(IPAMPollInterval)
-	defer ticker.Stop()
-
 	namespacedName := types.NamespacedName{Name: claimName, Namespace: h.vmScope.Namespace()}
 
-	for {
+	pollErr := wait.PollUntilContextTimeout(ctx, IPAMPollInterval, IPAMTimeout, true, func(ctx context.Context) (bool, error) {
 		claim := &v1beta1.IPAddressClaim{}
 		err := h.client.Get(ctx, namespacedName, claim)
 		if apierrors.IsNotFound(err) {
-			return nil // Deletion complete
+			return true, nil // Deletion complete
 		}
 		if err != nil {
-			return err
+			return false, err
 		}
+		return false, nil // Continue polling
+	})
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			// Continue polling
-		}
+	if pollErr != nil {
+		return fmt.Errorf("failed waiting for IPClaim %s to be deleted: %w", claimName, pollErr)
 	}
+
+	return nil
 }
 
 // SyncIPClaimAfterMOC creates IPClaim with MOC-allocated IP for tracking purposes
@@ -224,7 +226,7 @@ func (h *IPAMService) SyncIPClaim(ctx context.Context, claimName, mocAllocatedIP
 		if err := h.verifyAllocatedIP(ctx, ipClaim, mocAllocatedIP); err != nil {
 			logger.Info("Allocated IP does not match expected MOC IP, recreating IPAllocation CR", "err", err.Error())
 			// Delete existing CR to recreate
-			if delErr := h.deleteIPClaimAndWait(syncCtx, claimName); delErr != nil {
+			if delErr := h.DeleteIPClaim(syncCtx, claimName); delErr != nil {
 				return fmt.Errorf("failed to delete mismatched IPAllocation CR: %w", delErr)
 			}
 		} else {
