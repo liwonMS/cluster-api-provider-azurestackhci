@@ -19,9 +19,13 @@ package networkinterfaces
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"net"
+	"strings"
 	"time"
 
+	azlocalapi "dev.azure.com/msazure/One/_git/azlocal-overlay.git/api/v1alpha1/ipam"
 	"github.com/go-logr/logr"
 	"github.com/microsoft/moc-sdk-for-go/services/network"
 	"github.com/microsoft/moc-sdk-for-go/services/network/virtualnetwork"
@@ -49,6 +53,7 @@ const (
 	IPAddressAllocationTypeStatic  IPAddressAllocationType = "Static"
 	AzstackhciAPIGroup             string                  = "infrastructure.azstackhci.microsoft.com"
 	ArcVMLnetMocResourceGroup      string                  = "Default_Group"
+	ManagementVnetName             string                  = "vnet-arcbridge"
 )
 
 const (
@@ -81,7 +86,7 @@ type IPAMService struct {
 	client      client.Client
 	logger      logr.Logger
 	vmMeta      VmMeta
-	nicSpec     NicSpec
+	vnetSpec    VnetSpec
 	vnetsClient virtualnetwork.VirtualNetworkClient
 }
 
@@ -89,10 +94,11 @@ type VmMeta struct {
 	clusterName string
 	vmName      string
 	namespace   string
-	vmRef       metav1.Object
+	vmRef       metav1.Object //ref to azurestackhcivirtualmachine object
 }
 
-type NicSpec struct {
+// moc vnet spec
+type VnetSpec struct {
 	vnetName   string
 	subnetName string
 }
@@ -109,9 +115,9 @@ func NewIPAMHelper(vmscope *scope.VirtualMachineScope) *IPAMService {
 			namespace:   vmscope.Namespace(),
 			vmRef:       vmscope.AzureStackHCIVirtualMachine,
 		},
-		nicSpec: NicSpec{
+		vnetSpec: VnetSpec{
 			vnetName:   vmscope.VnetName(),
-			subnetName: vmscope.SubnetName(),
+			subnetName: vmscope.VnetName(), // use vnet name as this is the actual subnet name in moc lnet
 		},
 		vnetsClient: *vnetsClient,
 	}
@@ -123,9 +129,13 @@ func NewIPAMHelper(vmscope *scope.VirtualMachineScope) *IPAMService {
 // which corresponds to MOC Default_Group resource group.
 // the function can be replaced by passing down vnet properties through capi in the future.
 func (h *IPAMService) IsIPAMEnabledForVnet(ctx context.Context) bool {
-	vnets, err := h.vnetsClient.Get(ctx, ArcVMLnetMocResourceGroup, h.nicSpec.vnetName)
+	if h.vnetSpec.vnetName == ManagementVnetName {
+		h.logger.Info("Management VNet detected, skipping IPAM", "vnetName", h.vnetSpec.vnetName)
+		return false
+	}
+	vnets, err := h.vnetsClient.Get(ctx, ArcVMLnetMocResourceGroup, h.vnetSpec.vnetName)
 	if err != nil || vnets == nil || len(*vnets) == 0 {
-		h.logger.Error(err, "Failed to get VNet from MOC", "vnetName", h.nicSpec.vnetName)
+		h.logger.Error(err, "Failed to get VNet from MOC", "vnetName", h.vnetSpec.vnetName)
 		return false
 	}
 
@@ -133,7 +143,7 @@ func (h *IPAMService) IsIPAMEnabledForVnet(ctx context.Context) bool {
 	if vnet.VirtualNetworkPropertiesFormat == nil ||
 		vnet.VirtualNetworkPropertiesFormat.Subnets == nil ||
 		len(*vnet.VirtualNetworkPropertiesFormat.Subnets) == 0 {
-		h.logger.Info("VNet has no subnets, skipping IPAM", "vnetName", h.nicSpec.vnetName)
+		h.logger.Info("VNet has no subnets, skipping IPAM", "vnetName", h.vnetSpec.vnetName)
 		return false
 	}
 
@@ -141,13 +151,13 @@ func (h *IPAMService) IsIPAMEnabledForVnet(ctx context.Context) bool {
 	firstSubnet := (*vnet.VirtualNetworkPropertiesFormat.Subnets)[0]
 	if firstSubnet.IPAllocationMethod != network.Static {
 		h.logger.Info("VNet subnet not configured for Static IP allocation, skipping IPAM",
-			"vnetName", h.nicSpec.vnetName,
+			"vnetName", h.vnetSpec.vnetName,
 			"allocationMethod", firstSubnet.IPAllocationMethod)
 		return false
 	}
 
 	h.logger.Info("VNet configured for Static IP allocation, proceeding with IPAM",
-		"vnetName", h.nicSpec.vnetName)
+		"vnetName", h.vnetSpec.vnetName)
 	return true
 }
 
@@ -197,38 +207,37 @@ func (h *IPAMService) deleteIPClaimAndWait(ctx context.Context, claimName string
 		return err
 	}
 
-    ticker := time.NewTicker(IPAMPollInterval)
-    defer ticker.Stop()
-    
-    namespacedName := types.NamespacedName{Name: claimName, Namespace: h.vmMeta.namespace}
-    
-    for {
-        claim := &v1beta1.IPAddressClaim{}
-        err := h.client.Get(ctx, namespacedName, claim)
-        if apierrors.IsNotFound(err) {
-            return nil // Deletion complete
-        }
-        if err != nil {
-            return err
-        }
-        
-        select {
-        case <-ctx.Done():
-            return ctx.Err()
-        case <-ticker.C:
-            // Continue polling
-        }
-    }
+	ticker := time.NewTicker(IPAMPollInterval)
+	defer ticker.Stop()
+
+	namespacedName := types.NamespacedName{Name: claimName, Namespace: h.vmMeta.namespace}
+
+	for {
+		claim := &v1beta1.IPAddressClaim{}
+		err := h.client.Get(ctx, namespacedName, claim)
+		if apierrors.IsNotFound(err) {
+			return nil // Deletion complete
+		}
+		if err != nil {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			// Continue polling
+		}
+	}
 }
 
 // SyncIPClaimAfterMOC creates IPClaim with MOC-allocated IP for tracking purposes
 // This is best-effort and non-blocking, non-waiting, allocation status is not checked.
 func (h *IPAMService) SyncIPClaim(ctx context.Context, claimName, mocAllocatedIP string) error {
-	if mocAllocatedIP == "" {
+	logger := h.logger.WithValues("IPAllocationSync", h.vmMeta.vmName, "claimName", claimName, "mocAllocatedIP", mocAllocatedIP, "vnetName", h.vnetSpec.vnetName)
+	if mocAllocatedIP == "" || h.vnetSpec.vnetName == ManagementVnetName {
 		return nil // No IP to sync
 	}
-
-	logger := h.logger.WithValues("IPAllocationSync", h.vmMeta.vmName, "claimName", claimName)
 
 	// Use timeout for sync operations
 	syncCtx, cancel := context.WithTimeout(ctx, IPAMTimeout)
@@ -254,7 +263,7 @@ func (h *IPAMService) SyncIPClaim(ctx context.Context, claimName, mocAllocatedIP
 			}
 		} else {
 			return nil // IP matches, nothing to do
-		}		
+		}
 	}
 
 	// only check with moc if necessary as the call is expensive.
@@ -276,7 +285,7 @@ func (h *IPAMService) verifyAllocatedIP(ctx context.Context, claim *v1beta1.IPAd
 	defer cancel()
 
 	if claim.Status.AddressRef.Name == "" {
-		return fmt.Errorf("IPClaim %s has no allocated address", claim.Name)
+		return fmt.Errorf("IPClaim %s has no allocated address", claim.ObjectMeta.Name)
 	}
 
 	ipAddr := &v1beta1.IPAddress{}
@@ -290,7 +299,7 @@ func (h *IPAMService) verifyAllocatedIP(ctx context.Context, claim *v1beta1.IPAd
 	}
 
 	if ipAddr.Spec.Address != expectedIP {
-		return fmt.Errorf("IPClaim %s has mismatched IP: expected %s, got %s", claim.Name, expectedIP, ipAddr.Spec.Address)
+		return fmt.Errorf("IPClaim %s has mismatched IP: expected %s, got %s", claim.ObjectMeta.Name, expectedIP, ipAddr.Spec.Address)
 	}
 
 	return nil // IP matches
@@ -305,7 +314,7 @@ func (h *IPAMService) createIPClaim(ctx context.Context, logger logr.Logger, cla
 		"namespace", h.vmMeta.namespace,
 		"clusterName", h.vmMeta.clusterName,
 		"ownerRef", h.vmMeta.vmRef.GetName(),
-		"vnetName", h.nicSpec.vnetName,
+		"vnetName", h.vnetSpec.vnetName,
 		"allocationSource", IPAddressAllocationSourceIPAM,
 	)
 
@@ -407,5 +416,5 @@ func (h *IPAMService) GenerateIPClaimName(nicName string, index int) string {
 // resolvePoolName maps VNet/Subnet to IPPool name based on naming convention
 func (h *IPAMService) resolvePoolName() string {
 	// This follows the naming convention from azstackhci-operator
-	return fmt.Sprintf("ippool-%s-%s-0", h.nicSpec.vnetName, h.nicSpec.subnetName)
+	return fmt.Sprintf("ippool-%s-%s-0", h.vnetSpec.vnetName, h.nicSpec.subnetName)
 }
