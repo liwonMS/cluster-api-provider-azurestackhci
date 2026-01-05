@@ -153,14 +153,12 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 		telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), nicSpec.Name), &networkInterface, err)
 	if err != nil {
 		if s.shouldRetryIfIPConflict(err, nicSpec) {
-			if err := s.handleIPAddressConflictRetry(ctx, nicSpec, &networkInterface); err != nil {
-				return err
+			if createdNic, err = s.handleIPAddressConflictRetry(ctx, nicSpec, &networkInterface); err != nil {
+				return errors.Wrapf(err, "failed to retry create with network interface %s in resource group %s", nicSpec.Name, s.Scope.GetResourceGroup())
 			}
-
-			logger.Info("successfully created network interface ", "name", nicSpec.Name)
-			return nil
+		} else {
+			return errors.Wrapf(err, "failed to create network interface %s in resource group %s", nicSpec.Name, s.Scope.GetResourceGroup())
 		}
-		return errors.Wrapf(err, "failed to create network interface %s in resource group %s", nicSpec.Name, s.Scope.GetResourceGroup())
 	}
 
 	if err := s.SyncNicIPClaim(ctx, *createdNic); err != nil {
@@ -183,21 +181,22 @@ func (s *Service) shouldRetryIfIPConflict(err error, nicSpec *Spec) bool {
 	return mocerrors.IsAlreadySet(err)
 }
 
-func (s *Service) handleIPAddressConflictRetry(ctx context.Context, vnicSpec *Spec, networkInterface *network.Interface) error {
+func (s *Service) handleIPAddressConflictRetry(ctx context.Context, vnicSpec *Spec, networkInterface *network.Interface) (*network.Interface, error) {
 	logger := s.Scope.GetLogger()
 	logger.Info("IP allocated by IPAM is already taken in Moc, retrying", "Conflicted IP", (*networkInterface.IPConfigurations)[0].InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress)
 
 	// Remove the failed mocnetworkinterface
 	if err := s.Delete(ctx, vnicSpec); err != nil {
-		return err
+		return nil, err
 	}
 
 	for _, ipconfig := range *networkInterface.IPConfigurations {
 		ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress = nil
 	}
 
+	logger.Info("Creating network interface with empty PrivateIPAddress")
 	// Recreate the mocnetworkinterface without the IPAM allocated IP
-	_, err := s.Client.CreateOrUpdate(ctx,
+	createdNic, err := s.Client.CreateOrUpdate(ctx,
 		s.Scope.GetResourceGroup(),
 		vnicSpec.Name,
 		networkInterface)
@@ -205,7 +204,7 @@ func (s *Service) handleIPAddressConflictRetry(ctx context.Context, vnicSpec *Sp
 	telemetry.WriteMocOperationLog(s.Scope.GetLogger(), telemetry.CreateOrUpdate, s.Scope.GetCustomResourceTypeWithName(), telemetry.NetworkInterface,
 		telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), vnicSpec.Name), &networkInterface, err)
 
-	return err
+	return createdNic, err
 }
 
 // Delete deletes the network interface with the provided name.
@@ -219,7 +218,7 @@ func (s *Service) Delete(ctx context.Context, spec interface{}) error {
 	logger.Info("deleting nic", "name", nicSpec.Name)
 	defer func() {
 		if err := s.DeleteNicIPClaim(ctx, nicSpec); err != nil {
-			logger.Error(err, "failed to delete IPAM claim for nic", nicSpec.Name)
+			logger.Error(err, "failed to delete IPAM claim for nic", "name", nicSpec.Name)
 		}
 	}()
 
@@ -250,7 +249,7 @@ func (s *Service) ensureNicDeleted(ctx context.Context, nicSpec *Spec) error {
 		_, err := s.Get(ctx, nicSpec)
 		if err != nil {
 			if azurestackhci.ResourceNotFound(err) {
-				logger.Info("nic not found", "name", nicSpec.Name)
+				logger.Info("nic is deleted", "name", nicSpec.Name)
 				return true, nil // Deletion complete
 			}
 			logger.Error(err, "failed to get nic", "name", nicSpec.Name)
@@ -297,6 +296,14 @@ func (s *Service) SyncNicIPClaim(ctx context.Context, mocNic network.Interface) 
 
 func (s *Service) DeleteNicIPClaim(ctx context.Context, nicSpec *Spec) error {
 	var errs error
+	if len(nicSpec.IPConfigurations) == 0 {
+		claimName := s.IPAMService.GenerateIPClaimName(nicSpec.Name, 0)
+		if errs = s.IPAMService.DeleteIPClaim(ctx, claimName); errs != nil {
+			s.Scope.GetLogger().Info("Failed to delete IPClaim during reconcile", "error", errs)
+		}
+		return errs
+	}
+
 	for index := range nicSpec.IPConfigurations {
 		claimName := s.IPAMService.GenerateIPClaimName(nicSpec.Name, index)
 		if err := s.IPAMService.DeleteIPClaim(ctx, claimName); err != nil {

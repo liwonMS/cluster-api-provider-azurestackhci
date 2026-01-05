@@ -63,6 +63,18 @@ func newAzureStackHCIVirtualMachineService(vmScope *scope.VirtualMachineScope) *
 func (s *azureStackHCIVirtualMachineService) ReconcileNics() (string, error) {
 	nicName := azurestackhci.GenerateNICName(s.vmScope.Name())
 
+	var ipconfigs = s.generateIPConfigs()
+
+	nicErr := s.reconcileNetworkInterface(nicName, ipconfigs)
+	if nicErr != nil {
+		return "", errors.Wrapf(nicErr, "failed to create nic %s for machine %s", nicName, s.vmScope.Name())
+	}
+
+	return nicName, nil
+}
+
+func (s *azureStackHCIVirtualMachineService) generateIPConfigs() networkinterfaces.IPConfigurations {
+	nicName := azurestackhci.GenerateNICName(s.vmScope.Name())
 	var ipconfigs networkinterfaces.IPConfigurations
 
 	if len(s.vmScope.AzureStackHCIVirtualMachine.Spec.NetworkInterfaces) > 0 {
@@ -80,13 +92,7 @@ func (s *azureStackHCIVirtualMachineService) ReconcileNics() (string, error) {
 			ipconfigs = append(ipconfigs, ipconfig)
 		}
 	}
-
-	nicErr := s.reconcileNetworkInterface(nicName, ipconfigs)
-	if nicErr != nil {
-		return "", errors.Wrapf(nicErr, "failed to create nic %s for machine %s", nicName, s.vmScope.Name())
-	}
-
-	return nicName, nil
+	return ipconfigs
 }
 
 // Create creates machine if and only if machine exists, handled by cluster-api
@@ -139,8 +145,9 @@ func (s *azureStackHCIVirtualMachineService) Delete() error {
 	}
 
 	networkInterfaceSpec := &networkinterfaces.Spec{
-		Name:     azurestackhci.GenerateNICName(s.vmScope.Name()),
-		VnetName: s.vmScope.VnetName(),
+		Name:             azurestackhci.GenerateNICName(s.vmScope.Name()),
+		VnetName:         s.vmScope.VnetName(),
+		IPConfigurations: s.generateIPConfigs(),
 	}
 
 	err = s.networkInterfacesSvc.Delete(s.vmScope.Context, networkInterfaceSpec)

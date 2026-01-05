@@ -147,6 +147,7 @@ func (s *IPAMService) AllocateIPClaim(ctx context.Context, claimName, staticIPAd
 
 // DeleteIPClaim cleans up IPClaim on failure or conflict
 func (s *IPAMService) DeleteIPClaim(ctx context.Context, claimName string) (err error) {
+	logger := s.logger.WithValues("DeleteVmIPClaim", s.vmScope.Name(), "claimName", claimName)
 	defer func() {
 		telemetry.WriteMocOperationLog(s.logger, telemetry.Delete, s.vmScope.GetCustomResourceTypeWithName(), telemetry.IPAddressClaim,
 			telemetry.GenerateMocResourceName(s.vmScope.GetResourceGroup(), claimName), nil, err)
@@ -166,15 +167,16 @@ func (s *IPAMService) DeleteIPClaim(ctx context.Context, claimName string) (err 
 		return fmt.Errorf("failed to delete IPClaim %s: %w", claimName, err)
 	}
 
-	if err := s.ensureIPClaimDeleted(ctx, claimName); err != nil {
+	if err := s.ensureIPClaimDeleted(ctx, logger, claimName); err != nil {
 		return err
 	}
 
-	s.logger.Info("Deleted IPClaim", "name", claimName)
+	logger.Info("Deleted IPClaim")
 	return nil
 }
 
-func (s *IPAMService) ensureIPClaimDeleted(ctx context.Context, claimName string) error {
+func (s *IPAMService) ensureIPClaimDeleted(ctx context.Context, logger logr.Logger, claimName string) error {
+	logger.Info("Waiting for IPClaim to be deleted")
 	namespacedName := types.NamespacedName{Name: claimName, Namespace: s.vmScope.Namespace()}
 
 	pollErr := wait.PollUntilContextTimeout(ctx, IPAMPollInterval, IPAMTimeout, true, func(ctx context.Context) (bool, error) {
