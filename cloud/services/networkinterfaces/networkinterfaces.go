@@ -145,7 +145,7 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 
 	logger.Info("creating network interface ", "name", nicSpec.Name)
 
-	_, err := s.Client.CreateOrUpdate(ctx,
+	createdNic, err := s.Client.CreateOrUpdate(ctx,
 		s.Scope.GetResourceGroup(),
 		nicSpec.Name,
 		&networkInterface)
@@ -156,11 +156,16 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 			if err := s.handleIPAddressConflictRetry(ctx, nicSpec, &networkInterface); err != nil {
 				return err
 			}
-			
+
 			logger.Info("successfully created network interface ", "name", nicSpec.Name)
 			return nil
 		}
 		return errors.Wrapf(err, "failed to create network interface %s in resource group %s", nicSpec.Name, s.Scope.GetResourceGroup())
+	}
+
+	if err := s.SyncNicIPClaim(ctx, *createdNic); err != nil {
+		logger.Info("Failed to sync IPClaim after NIC creation", "error", err)
+		// Non-blocking - don't fail NIC reconcile
 	}
 
 	logger.Info("successfully created network interface ", "name", nicSpec.Name)
@@ -180,7 +185,7 @@ func (s *Service) shouldRetryIfIPConflict(err error, nicSpec *Spec) bool {
 
 func (s *Service) handleIPAddressConflictRetry(ctx context.Context, vnicSpec *Spec, networkInterface *network.Interface) error {
 	logger := s.Scope.GetLogger()
-	logger.Info("IP allocated by IPAM is already taken in Moc, retrying", "IP", (*networkInterface.IPConfigurations)[0].InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress)
+	logger.Info("IP allocated by IPAM is already taken in Moc, retrying", "Conflicted IP", (*networkInterface.IPConfigurations)[0].InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress)
 
 	// Remove the failed mocnetworkinterface
 	if err := s.Delete(ctx, vnicSpec); err != nil {

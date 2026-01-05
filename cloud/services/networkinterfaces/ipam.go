@@ -86,12 +86,12 @@ func NewIPAMService(vmscope *scope.VirtualMachineScope) *IPAMService {
 	}
 }
 
-// IsIPAMEnabledForVnet checks if the VNet is configured for Static IP allocation.
+// isIPAMEnabledForVnet checks if the VNet is configured for Static IP allocation.
 // Returns true if IPAM should be used, false otherwise.
 // IPAM service specifically applies to lnets created by Arc VM extension,
 // which corresponds to MOC Default_Group resource group.
 // the function can be replaced by passing down vnet properties through capi in the future.
-func (s *IPAMService) IsIPAMEnabledForVnet(ctx context.Context) bool {
+func (s *IPAMService) isIPAMEnabledForVnet(ctx context.Context) bool {
 	if s.vmScope.VnetName() == ManagementVnetName {
 		s.logger.Info("Management VNet detected, skipping IPAM", "vnetName", s.vmScope.VnetName())
 		return false
@@ -129,7 +129,7 @@ func (s *IPAMService) IsIPAMEnabledForVnet(ctx context.Context) bool {
 // If fails to create the IPAllocation or retrieve the IP, it logs the error and allows MOC to handle the IP allocation.
 func (s *IPAMService) AllocateIPClaim(ctx context.Context, claimName, staticIPAddress string) (string, error) {
 	logger := s.logger.WithValues("AllocateVmIPClaim", s.vmScope.Name(), "claimName", claimName)
-	if enabled := s.IsIPAMEnabledForVnet(ctx); !enabled {
+	if enabled := s.isIPAMEnabledForVnet(ctx); !enabled {
 		return "", nil
 	}
 
@@ -175,10 +175,6 @@ func (s *IPAMService) DeleteIPClaim(ctx context.Context, claimName string) (err 
 }
 
 func (s *IPAMService) ensureIPClaimDeleted(ctx context.Context, claimName string) error {
-	if err := s.DeleteIPClaim(ctx, claimName); err != nil {
-		return err
-	}
-
 	namespacedName := types.NamespacedName{Name: claimName, Namespace: s.vmScope.Namespace()}
 
 	pollErr := wait.PollUntilContextTimeout(ctx, IPAMPollInterval, IPAMTimeout, true, func(ctx context.Context) (bool, error) {
@@ -217,13 +213,13 @@ func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, mocAllocatedIP
 	err := s.client.Get(syncCtx, types.NamespacedName{Name: claimName, Namespace: s.vmScope.Namespace()}, ipClaim)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			logger.Info("IPAllocation is not found, creating new one", "crName", claimName)
+			logger.Info("IPAllocation is not found, creating new one")
 			// Fall through to create new CR
 		} else {
 			return fmt.Errorf("failed to verify IPAllocation CR: %w", err)
 		}
 	} else {
-		logger.Info("IPAllocation CR already exists, verifying against IP", "crName", claimName, "expectedIP", mocAllocatedIP)
+		logger.Info("IPAllocation CR already exists, verifying IP")
 		if err := s.verifyAllocatedIP(ctx, ipClaim, mocAllocatedIP); err != nil {
 			logger.Info("Allocated IP does not match expected MOC IP, recreating IPAllocation CR", "err", err.Error())
 			// Delete existing CR to recreate
@@ -236,7 +232,7 @@ func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, mocAllocatedIP
 	}
 
 	// only check with moc if necessary as the call is expensive.
-	if enabled := s.IsIPAMEnabledForVnet(ctx); !enabled {
+	if enabled := s.isIPAMEnabledForVnet(ctx); !enabled {
 		return nil
 	}
 
@@ -255,7 +251,7 @@ func (s *IPAMService) verifyAllocatedIP(ctx context.Context, claim *v1beta1.IPAd
 	defer cancel()
 
 	if claim.Status.AddressRef.Name == "" {
-		return fmt.Errorf("IPClaim %s has no allocated address", claim.ObjectMeta.Name)
+		return fmt.Errorf("IPClaim has no allocated address")
 	}
 
 	ipAddr := &v1beta1.IPAddress{}
@@ -284,7 +280,7 @@ func (s *IPAMService) createIPClaim(ctx context.Context, logger logr.Logger, cla
 	}()
 
 	logger.Info("createIPClaim IPAddressClaim details",
-		"name", claimName,
+		"ip", ip,
 		"namespace", s.vmScope.Namespace(),
 		"clusterName", s.vmScope.ClusterName(),
 		"ownerRef", s.vmScope.Name(),
@@ -316,7 +312,7 @@ func (s *IPAMService) createIPClaim(ctx context.Context, logger logr.Logger, cla
 
 	if err = s.client.Create(ctx, claim); err != nil {
 		if apierrors.IsAlreadyExists(err) {
-			s.logger.Info("IPClaim already exists", "name", claimName)
+			s.logger.Info("IPClaim already exists")
 			return nil
 		}
 		return fmt.Errorf("failed to create IPClaim %s: %w", claimName, err)
@@ -329,7 +325,7 @@ func (s *IPAMService) createIPClaim(ctx context.Context, logger logr.Logger, cla
 // WaitForIPAllocation waits for IPClaim to be fulfilled within the timeout period
 // Returns the allocated IP address or error on failure/timeout
 func (s *IPAMService) waitForIPAllocation(ctx context.Context, logger logr.Logger, claimName string) (string, error) {
-	logger.Info("Attempting to retrieve IP from ipAddressClaim", "ipAddressClaim", claimName)
+	logger.Info("Attempting to retrieve IP from ipAddressClaim")
 	ticker := time.NewTicker(IPAMPollInterval)
 	defer ticker.Stop()
 
@@ -357,8 +353,7 @@ func (s *IPAMService) waitForIPAllocation(ctx context.Context, logger logr.Logge
 				return "", fmt.Errorf("failed to get IPAddress: %w", err)
 			}
 
-			logger.Info("IPAM allocation successful",
-				"claim", claimName, "ip", ipAddr.Spec.Address)
+			logger.Info("IPAM allocation successful", "ip", ipAddr.Spec.Address)
 			return ipAddr.Spec.Address, nil
 		}
 
