@@ -156,7 +156,7 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 			if err := s.handleIPAddressConflictRetry(ctx, nicSpec, &networkInterface); err != nil {
 				return err
 			}
-			
+
 			logger.Info("successfully created network interface ", "name", nicSpec.Name)
 			return nil
 		}
