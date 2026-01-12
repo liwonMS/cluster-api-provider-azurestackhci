@@ -64,7 +64,9 @@ const (
 	AnnotationCreatedBy     = AzstackhciAPIGroup + "/created-by"
 	AnnotationCreatedByCAPH = "caph"
 
-	AnnotationStaticIP = "ipam." + AzstackhciAPIGroup + "/requested-ip"
+	AnnotationStaticIP           = "ipam." + AzstackhciAPIGroup + "/requested-ip"
+	AnnotationLogicalNetworkName = "ipam." + AzstackhciAPIGroup + "/logicalNetworkName"
+	AnnotationSubnetName         = "ipam." + AzstackhciAPIGroup + "/subnetName"
 )
 
 // IPAMService provides functionality to manage IPAddressClaim CRs for network interfaces
@@ -294,17 +296,14 @@ func (s *IPAMService) createIPClaim(ctx context.Context, logger logr.Logger, cla
 			Name:      claimName,
 			Namespace: s.vmScope.Namespace(),
 			Annotations: map[string]string{
-				AnnotationCreatedBy: AnnotationCreatedByCAPH,
-				AnnotationStaticIP:  ip,
+				AnnotationCreatedBy:          AnnotationCreatedByCAPH,
+				AnnotationStaticIP:           ip,
+				AnnotationLogicalNetworkName: s.vmScope.VnetName(),
+				AnnotationSubnetName:         s.vmScope.VnetName(),
 			},
 		},
 		Spec: v1beta1.IPAddressClaimSpec{
 			ClusterName: s.vmScope.ClusterName(),
-			PoolRef: corev1.TypedLocalObjectReference{
-				Name:     s.resolvePoolName(),
-				Kind:     "IPPool",
-				APIGroup: strPtr(AzstackhciAPIGroup),
-			},
 		},
 	}
 
@@ -380,12 +379,4 @@ func (s *IPAMService) waitForIPAllocation(ctx context.Context, logger logr.Logge
 // GenerateIPClaimName creates a deterministic IPClaim CR name from NIC spec
 func (s *IPAMService) GenerateIPClaimName(nicName string, index int) string {
 	return fmt.Sprintf("ipclaim-%s-%d", nicName, index)
-}
-
-// resolvePoolName maps VNet/Subnet to IPPool name based on naming convention
-func (s *IPAMService) resolvePoolName() string {
-	// This follows the naming convention from azstackhci-operator
-	// TODO: change to return this instead befor merge.
-	// return fmt.Sprintf("ippool-%s-%s-0", s.vmScope.VnetName(), s.vmScope.VnetName())
-	return fmt.Sprintf("ippool-%s-0", s.vmScope.VnetName())
 }
