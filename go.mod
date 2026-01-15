@@ -54,7 +54,7 @@ require (
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/btree v1.1.3 // indirect
-	github.com/google/gnostic-models v0.6.8 // indirect
+	github.com/google/gnostic-models v0.6.9 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/pprof v0.0.0-20250403155104-27863c87afa6 // indirect
@@ -90,7 +90,7 @@ require (
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/term v0.37.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
-	golang.org/x/time v0.8.0 // indirect
+	golang.org/x/time v0.9.0 // indirect
 	golang.org/x/tools v0.38.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250428153025-10db94c68c34 // indirect
@@ -102,27 +102,20 @@ require (
 	k8s.io/cluster-bootstrap v0.32.3 // indirect
 	k8s.io/component-base v0.32.3 // indirect
 	k8s.io/klog v1.0.0 // indirect
-	k8s.io/kube-openapi v0.0.0-20241105132330-32ad38e42d3f // indirect
+	k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff // indirect
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
-	sigs.k8s.io/structured-merge-diff/v4 v4.5.0 // indirect
+	sigs.k8s.io/randfill v1.0.0 // indirect
+	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
 replace (
-	//dev.azure.com/msazure/One/_git/azlocal-overlay.git/api => ../azlocal-overlay/api
-	//dev.azure.com/msazure/One/_git/azlocal-overlay.git/build/version => ../azlocal-overlay/build/version
-	//dev.azure.com/msazure/One/_git/azlocal-overlay.git/observability => ../azlocal-overlay/observability
-	//dev.azure.com/msazure/One/_git/azlocal-overlay.git/operators/ipam => ../azlocal-overlay/operators/ipam
-	//dev.azure.com/msazure/One/_git/azlocal-overlay.git/util => ../azlocal-overlay/util
-	//dev.azure.com/msazure/msk8s/_git/azstackhci-operator.git => ../azstackhci-operator
-	//dev.azure.com/msazure/msk8s/_git/moc-operator.git => ../moc-operator
 	dev.azure.com/msazure/msk8s/_git/azstackhci-operator.git/pkg/ipam => ../azstackhci-operator/pkg/ipam
 	github.com/dgrijalva/jwt-go => github.com/golang-jwt/jwt/v4 v4.1.0
 	github.com/elazarl/goproxy => github.com/elazarl/goproxy v0.0.0-20230731152917-f99041a5c027
 	github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
 	github.com/golang-jwt/jwt/v4 => github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/gorilla/websocket => github.com/gorilla/websocket v1.4.2
-	//github.com/microsoft/moc-pkg => ../moc-pkg
 	github.com/miekg/dns => github.com/miekg/dns v1.1.25
 	github.com/nats-io/nats-server/v2 => github.com/nats-io/nats-server/v2 v2.9.23
 	github.com/nats-io/nkeys => github.com/nats-io/nkeys v0.4.6
@@ -130,7 +123,6 @@ replace (
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp => go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.44.0
 	golang.org/x/image => golang.org/x/image v0.10.0
 	google.golang.org/grpc => google.golang.org/grpc v1.56.3
-//sigs.k8s.io/cluster-api => ../cluster-api
 )
 
 // Brought in by google.golang.org/grpc bump to 1.56.3, but uses CC-BY-SA-3.0 copyleft license

@@ -19,183 +19,116 @@ package networkinterfaces
 
 import (
 	"context"
-	"fmt"
 
+	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/go-logr/logr"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"github.com/microsoft/moc-sdk-for-go/services/network"
+	"go.uber.org/multierr"
 
-	ipamhelper "dev.azure.com/msazure/msk8s/_git/azstackhci-operator.git/pkg/ipam"
+	ipam "dev.azure.com/msazure/msk8s/_git/azstackhci-operator.git/pkg/ipam"
 	"github.com/microsoft/cluster-api-provider-azurestackhci/cloud/scope"
 	"github.com/microsoft/cluster-api-provider-azurestackhci/cloud/telemetry"
 )
 
-// IPAMService provides functionality to manage IPAddressClaim CRs for network interfaces.
-// It wraps the shared ipamhelper package from azstackhci-operator.
-type IPAMService struct {
-	claimHelper *ipamhelper.IPClaimHelper
-	vnetChecker *ipamhelper.VNetChecker
-	client      client.Client
-	logger      logr.Logger
-	vmScope     *scope.VirtualMachineScope
+// CAPHTelemetryWriter implements ipam.IPAMTelemetryWriter for CAPH.
+type CAPHTelemetryWriter struct {
+	vmScope *scope.VirtualMachineScope
 }
 
-// NewIPAMService creates a new IPAM service instance with the provided VM scope.
-// If VNetChecker creation fails, the service is still returned but IPAM will be disabled.
-func NewIPAMService(vmscope *scope.VirtualMachineScope) *IPAMService {
-	logger := vmscope.GetLogger()
-
-	vnetChecker, err := ipamhelper.NewVNetChecker(vmscope.CloudAgentFqdn, vmscope.Authorizer, logger)
-	if err != nil {
-		// Log error but continue - IPAM will be disabled
-		logger.Error(err, "Failed to create VNet checker, IPAM will be disabled")
-		vnetChecker = nil
+// WriteIPAMOperationLog implements ipam.IPAMTelemetryWriter.
+func (w *CAPHTelemetryWriter) WriteIPAMOperationLog(logger logr.Logger, operation ipam.IPAMOperation, claimName string, params map[string]string, err error) {
+	var telemetryOp telemetry.Operation
+	switch operation {
+	case ipam.OperationCreate, ipam.OperationSync:
+		telemetryOp = telemetry.Create
+	case ipam.OperationDelete:
+		telemetryOp = telemetry.Delete
+	case ipam.OperationGet:
+		telemetryOp = telemetry.Get
+	default:
+		telemetryOp = telemetry.Create
 	}
 
-	claimHelper := ipamhelper.NewIPClaimHelper(vmscope.Client(), logger)
-
-	return &IPAMService{
-		claimHelper: claimHelper,
-		vnetChecker: vnetChecker,
-		client:      vmscope.Client(),
-		logger:      logger,
-		vmScope:     vmscope,
-	}
-}
-
-// AllocateIPClaim tries to allocate a private IP for the given NIC using IPAM.
-// If successful, returns the allocated IP address.
-// If staticIPAddress is provided, it will be used as the requested IP.
-func (s *IPAMService) AllocateIPClaim(ctx context.Context, claimName, staticIPAddress string) (string, error) {
-	logger := s.logger.WithValues("AllocateVmIPClaim", s.vmScope.Name(), "claimName", claimName)
-
-	if !ipamhelper.IsIPAMEnabled(ctx, s.vnetChecker, s.vmScope.VnetName()) {
-		return "", nil
-	}
-
-	params := s.buildIPClaimParams(claimName, staticIPAddress)
-
-	allocatedIP, err := s.claimHelper.AllocateIP(ctx, params)
-	if err != nil {
-		telemetry.WriteMocOperationLog(logger, telemetry.Create, s.vmScope.GetCustomResourceTypeWithName(), telemetry.IPAddressClaim,
-			telemetry.GenerateMocResourceName(s.vmScope.GetResourceGroup(), claimName), nil, err)
-		return "", fmt.Errorf("failed to allocate IP from IPAM: %w", err)
-	}
-
-	telemetry.WriteMocOperationLog(logger, telemetry.Create, s.vmScope.GetCustomResourceTypeWithName(), telemetry.IPAddressClaim,
-		telemetry.GenerateMocResourceName(s.vmScope.GetResourceGroup(), claimName), nil, nil)
-
-	logger.Info("IPAM allocation successful", "claim", claimName, "ip", allocatedIP)
-	return allocatedIP, nil
-}
-
-// DeleteIPClaim cleans up IPClaim on failure or conflict.
-// Returns nil if the claim doesn't exist (idempotent).
-func (s *IPAMService) DeleteIPClaim(ctx context.Context, claimName string) (err error) {
-	logger := s.logger.WithValues("DeleteIPClaim", claimName)
-
-	defer func() {
-		telemetry.WriteMocOperationLog(logger, telemetry.Delete, s.vmScope.GetCustomResourceTypeWithName(), telemetry.IPAddressClaim,
-			telemetry.GenerateMocResourceName(s.vmScope.GetResourceGroup(), claimName), nil, err)
-	}()
-
-	return s.claimHelper.DeleteIPClaim(ctx, claimName, s.vmScope.Namespace())
-}
-
-// EnsureIPClaimDeleted deletes an IPClaim and waits for it to be fully removed.
-// This is useful when recreating claims to avoid conflicts.
-func (s *IPAMService) EnsureIPClaimDeleted(ctx context.Context, claimName string) error {
-	logger := s.logger.WithValues("EnsureIPClaimDeleted", claimName)
-
-	if err := s.claimHelper.EnsureIPClaimDeleted(ctx, claimName, s.vmScope.Namespace()); err != nil {
-		telemetry.WriteMocOperationLog(logger, telemetry.Delete, s.vmScope.GetCustomResourceTypeWithName(), telemetry.IPAddressClaim,
-			telemetry.GenerateMocResourceName(s.vmScope.GetResourceGroup(), claimName), nil, err)
-		return err
-	}
-
-	telemetry.WriteMocOperationLog(logger, telemetry.Delete, s.vmScope.GetCustomResourceTypeWithName(), telemetry.IPAddressClaim,
-		telemetry.GenerateMocResourceName(s.vmScope.GetResourceGroup(), claimName), nil, nil)
-
-	return nil
-}
-
-// SyncIPClaim creates IPClaim with MOC-allocated IP for tracking purposes.
-// This is best-effort and non-blocking (doesn't wait for allocation status).
-// If the claim exists with the same IP, it's a no-op. If the IP differs, it recreates the claim.
-func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, mocAllocatedIP string) error {
-	logger := s.logger.WithValues("SyncIPClaim", s.vmScope.Name(), "claimName", claimName, "mocAllocatedIP", mocAllocatedIP)
-
-	if mocAllocatedIP == "" || s.vmScope.VnetName() == ipamhelper.ManagementVnetName {
-		return nil // No IP to sync
-	}
-
-	if !ipamhelper.IsIPAMEnabled(ctx, s.vnetChecker, s.vmScope.VnetName()) {
-		return nil
-	}
-
-	params := s.buildIPClaimParams(claimName, mocAllocatedIP)
-
-	if err := s.claimHelper.SyncIPClaim(ctx, params); err != nil {
-		telemetry.WriteMocOperationLog(logger, telemetry.Create, s.vmScope.GetCustomResourceTypeWithName(), telemetry.IPAddressClaim,
-			telemetry.GenerateMocResourceName(s.vmScope.GetResourceGroup(), claimName), nil, err)
-		return fmt.Errorf("failed to sync IPClaim: %w", err)
-	}
-
-	telemetry.WriteMocOperationLog(logger, telemetry.Create, s.vmScope.GetCustomResourceTypeWithName(), telemetry.IPAddressClaim,
-		telemetry.GenerateMocResourceName(s.vmScope.GetResourceGroup(), claimName), nil, nil)
-
-	logger.Info("IPClaim synced successfully")
-	return nil
-}
-
-// VerifyIPClaimAddress checks if the IPAddress in the IPClaim matches the expected IP.
-func (s *IPAMService) VerifyIPClaimAddress(ctx context.Context, claimName, expectedIP string) error {
-	return s.claimHelper.VerifyIPClaimAddress(ctx, claimName, s.vmScope.Namespace(), expectedIP)
-}
-
-// GetIPClaimAddress retrieves the allocated IP from an existing IPClaim (non-blocking).
-// Returns empty string if the claim doesn't exist or has no allocated address yet.
-func (s *IPAMService) GetIPClaimAddress(ctx context.Context, claimName string) (string, error) {
-	return s.claimHelper.GetIPClaimAddress(ctx, claimName, s.vmScope.Namespace())
-}
-
-// GenerateIPClaimName creates a deterministic IPClaim CR name from NIC spec.
-// Format: ipclaim-<nicName>-<index>
-func (s *IPAMService) GenerateIPClaimName(nicName string, index int) string {
-	return ipamhelper.GenerateNICIPClaimName(nicName, index)
-}
-
-// buildIPClaimParams creates IPClaimParams with proper owner references for NIC IP allocation.
-func (s *IPAMService) buildIPClaimParams(claimName, staticIP string) ipamhelper.IPClaimParams {
-	var ownerRefs []metav1.OwnerReference
-
-	// Set owner reference to the AzureStackHCIVirtualMachine CR
-	if s.vmScope.AzureStackHCIVirtualMachine != nil {
-		tempMeta := &metav1.ObjectMeta{}
-		if err := controllerutil.SetOwnerReference(s.vmScope.AzureStackHCIVirtualMachine, tempMeta, s.client.Scheme(), controllerutil.WithBlockOwnerDeletion(false)); err == nil {
-			if len(tempMeta.OwnerReferences) > 0 {
-				ownerRefs = []metav1.OwnerReference{tempMeta.OwnerReferences[0]}
-			}
-		}
-	}
-
-	return ipamhelper.BuildIPClaimParams(
-		claimName,
-		s.vmScope.Namespace(),
-		s.vmScope.ClusterName(),
-		s.vmScope.VnetName(),
-		staticIP,
-		ipamhelper.IPClaimCreatorCAPH,
-		ownerRefs,
-		nil,
+	telemetry.WriteMocOperationLog(
+		logger,
+		telemetryOp,
+		w.vmScope.GetCustomResourceTypeWithName(),
+		telemetry.IPAddressClaim,
+		telemetry.GenerateMocResourceName(w.vmScope.GetResourceGroup(), claimName),
+		params,
+		err,
 	)
 }
 
-// DeleteIPClaimByName is a standalone helper function to delete an IPAddressClaim by name.
-// This can be used during cleanup without needing to create a full IPAMService.
-// Returns nil if the claim doesn't exist (NotFound is not an error).
-func DeleteIPClaimByName(ctx context.Context, k8sClient client.Client, claimName, namespace string) error {
-	claimHelper := ipamhelper.NewIPClaimHelper(k8sClient, logr.Discard())
-	return claimHelper.DeleteIPClaim(ctx, claimName, namespace)
+// IPAMService wraps ipam.IPAMService for CAPH-specific functionality.
+type IPAMService struct {
+	*ipam.IPAMService
+}
+
+// NewIPAMService creates a new IPAM service instance.
+func NewIPAMService(vmscope *scope.VirtualMachineScope) *IPAMService {
+	logger := vmscope.GetLogger()
+
+	config := ipam.IPAMServiceConfig{
+		Client:          vmscope.Client(),
+		Logger:          logger,
+		Namespace:       vmscope.Namespace(),
+		VnetName:        vmscope.VnetName(),
+		CloudFqdn:       vmscope.CloudAgentFqdn,
+		Authorizer:      vmscope.Authorizer,
+		TelemetryWriter: &CAPHTelemetryWriter{vmScope: vmscope},
+		ClusterName:     vmscope.ClusterName(),
+		CreatorID:       ipam.IPClaimCreatorCAPH,
+		Owner:           vmscope.AzureStackHCIVirtualMachine,
+	}
+
+	return &IPAMService{
+		IPAMService: ipam.NewIPAMService(config),
+	}
+}
+
+// AllocateNicIPClaim allocates IPClaims for all IP configurations on a NIC.
+func (s *IPAMService) AllocateNicIPClaim(ctx context.Context, mocNic network.Interface, staticIPAddress string) error {
+	var errs error
+	for index, ipconfig := range *mocNic.IPConfigurations {
+		claimName := ipam.GenerateNICIPClaimName(*mocNic.Name, index)
+		if allocatedIP, err := s.AllocateIP(ctx, claimName, staticIPAddress); err != nil {
+			errs = multierr.Append(errs, err)
+		} else {
+			ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress = to.StringPtr(allocatedIP)
+		}
+	}
+	return errs
+}
+
+// SyncNicIPClaim syncs IPClaims for all IP configurations on a NIC.
+func (s *IPAMService) SyncNicIPClaim(ctx context.Context, mocNic network.Interface) error {
+	var errs error
+	for index, ipconfig := range *mocNic.IPConfigurations {
+		claimName := ipam.GenerateNICIPClaimName(*mocNic.Name, index)
+		if err := s.SyncIPClaim(ctx, claimName, *(ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress)); err != nil {
+			errs = multierr.Append(errs, err)
+		}
+	}
+	return errs
+}
+
+// DeleteNicIPClaim deletes IPClaims for all IP configurations on a NIC.
+func (s *IPAMService) DeleteNicIPClaim(ctx context.Context, nicSpec *Spec) error {
+	var errs error
+	if len(nicSpec.IPConfigurations) == 0 {
+		claimName := ipam.GenerateNICIPClaimName(nicSpec.Name, 0)
+		if errs = s.DeleteIPClaim(ctx, claimName); errs != nil {
+			return errs
+		}
+		return nil
+	}
+
+	for index := range nicSpec.IPConfigurations {
+		claimName := ipam.GenerateNICIPClaimName(nicSpec.Name, index)
+		if err := s.DeleteIPClaim(ctx, claimName); err != nil {
+			errs = multierr.Append(errs, err)
+		}
+	}
+	return errs
 }

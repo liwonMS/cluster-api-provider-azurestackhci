@@ -27,7 +27,6 @@ import (
 	"github.com/microsoft/moc-sdk-for-go/services/network"
 	mocerrors "github.com/microsoft/moc/pkg/errors"
 	"github.com/pkg/errors"
-	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -77,7 +76,7 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 		// Sync back to IPAM to ensure claim exists
 		s.Scope.GetLogger().Info("Nic exists, attempting to sync IPClaim", "name", nicSpec.Name)
 		mocNic := nic.(network.Interface)
-		if err := s.SyncNicIPClaim(ctx, mocNic); err != nil {
+		if err := s.IPAMService.SyncNicIPClaim(ctx, mocNic); err != nil {
 			s.Scope.GetLogger().Info("Failed to sync IPClaim during reconcile", "error", err)
 			// Non-blocking - don't fail NIC reconcile
 		}
@@ -139,7 +138,7 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 	}
 
 	// assign ipam IP to the moc nic object.
-	if err := s.AllocateNicIPClaim(ctx, networkInterface, nicSpec.StaticIPAddress); err != nil {
+	if err := s.IPAMService.AllocateNicIPClaim(ctx, networkInterface, nicSpec.StaticIPAddress); err != nil {
 		logger.Error(err, "Failed to allocate IPClaim for network interface", "name", nicSpec.Name)
 	}
 
@@ -161,7 +160,7 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 		}
 	}
 
-	if err := s.SyncNicIPClaim(ctx, *createdNic); err != nil {
+	if err := s.IPAMService.SyncNicIPClaim(ctx, *createdNic); err != nil {
 		logger.Info("Failed to sync IPClaim after NIC creation", "error", err)
 		// Non-blocking - don't fail NIC reconcile
 	}
@@ -217,7 +216,7 @@ func (s *Service) Delete(ctx context.Context, spec interface{}) error {
 	logger := s.Scope.GetLogger()
 	logger.Info("deleting nic", "name", nicSpec.Name)
 	defer func() {
-		if err := s.DeleteNicIPClaim(ctx, nicSpec); err != nil {
+		if err := s.IPAMService.DeleteNicIPClaim(ctx, nicSpec); err != nil {
 			logger.Error(err, "failed to delete IPAM claim for nic", "name", nicSpec.Name)
 		}
 	}()
@@ -264,53 +263,4 @@ func (s *Service) ensureNicDeleted(ctx context.Context, nicSpec *Spec) error {
 	}
 
 	return nil
-}
-
-func (s *Service) AllocateNicIPClaim(ctx context.Context, mocNic network.Interface, staticIPAddress string) error {
-	var errs error
-	for index, ipconfig := range *mocNic.IPConfigurations {
-		claimName := s.IPAMService.GenerateIPClaimName(*mocNic.Name, index)
-		if allocatedIP, err := s.IPAMService.AllocateIPClaim(ctx, claimName, staticIPAddress); err != nil {
-			s.Scope.GetLogger().Info("Failed to allocate IPClaim during reconcile", "error", err)
-			errs = multierr.Append(errs, err)
-		} else {
-			ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress = to.StringPtr(allocatedIP)
-		}
-	}
-
-	return errs
-}
-
-func (s *Service) SyncNicIPClaim(ctx context.Context, mocNic network.Interface) error {
-	var errs error
-	for index, ipconfig := range *mocNic.IPConfigurations {
-		claimName := s.IPAMService.GenerateIPClaimName(*mocNic.Name, index)
-		if err := s.IPAMService.SyncIPClaim(ctx, claimName, *(ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress)); err != nil {
-			s.Scope.GetLogger().Info("Failed to sync IPClaim during reconcile", "error", err)
-			errs = multierr.Append(errs, err)
-		}
-	}
-
-	return errs
-}
-
-func (s *Service) DeleteNicIPClaim(ctx context.Context, nicSpec *Spec) error {
-	var errs error
-	if len(nicSpec.IPConfigurations) == 0 {
-		claimName := s.IPAMService.GenerateIPClaimName(nicSpec.Name, 0)
-		if errs = s.IPAMService.DeleteIPClaim(ctx, claimName); errs != nil {
-			s.Scope.GetLogger().Info("Failed to delete IPClaim during reconcile", "error", errs)
-		}
-		return errs
-	}
-
-	for index := range nicSpec.IPConfigurations {
-		claimName := s.IPAMService.GenerateIPClaimName(nicSpec.Name, index)
-		if err := s.IPAMService.DeleteIPClaim(ctx, claimName); err != nil {
-			s.Scope.GetLogger().Info("Failed to delete IPClaim during reconcile", "error", err)
-			errs = multierr.Append(errs, err)
-		}
-	}
-
-	return errs
 }
