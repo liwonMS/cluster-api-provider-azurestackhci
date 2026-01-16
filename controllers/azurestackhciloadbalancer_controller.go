@@ -27,6 +27,7 @@ import (
 	azurestackhci "github.com/microsoft/cluster-api-provider-azurestackhci/cloud"
 	"github.com/microsoft/cluster-api-provider-azurestackhci/cloud/scope"
 	"github.com/microsoft/cluster-api-provider-azurestackhci/cloud/services/loadbalancers"
+	caphipam "github.com/microsoft/cluster-api-provider-azurestackhci/pkg/ipam"
 	infrav1util "github.com/microsoft/cluster-api-provider-azurestackhci/pkg/util"
 	"github.com/microsoft/moc-sdk-for-go/services/network"
 	mocerrors "github.com/microsoft/moc/pkg/errors"
@@ -222,6 +223,13 @@ func (r *AzureStackHCILoadBalancerReconciler) reconcileNormal(lbs *scope.LoadBal
 		}
 	}
 
+	// Sync MOC-allocated LB IP to K8s-based IPAM (best-effort, non-blocking)
+	// This ensures existing clusters using legacy LBs have their IPs recorded in IPAM
+	if err := r.syncLoadBalancerIPToIPAM(lbs, clusterScope); err != nil {
+		// Log but don't fail the reconciliation - IPAM sync is best-effort
+		lbs.Info("Failed to sync LoadBalancer IP to IPAM (best-effort)", "error", err.Error())
+	}
+
 	// When a SDN integration is present, LB replica count will be 0 as the loadbalancing is handled by SDN.
 	// So fail only if the configured replica count is not 0.
 	if lbs.GetReplicas() != 0 && lbs.GetReadyReplicas() < 1 {
@@ -304,6 +312,11 @@ func (r *AzureStackHCILoadBalancerReconciler) reconcileDelete(lbs *scope.LoadBal
 		return reconcile.Result{}, err
 	}
 
+	// Delete the IPAM IPClaim for this LoadBalancer (best-effort, don't block deletion)
+	if err := r.deleteLoadBalancerIPClaim(lbs, clusterScope); err != nil {
+		lbs.Info("Failed to delete LoadBalancer IPClaim (best-effort)", "error", err.Error())
+	}
+
 	controllerutil.RemoveFinalizer(lbs.AzureStackHCILoadBalancer, infrav1.AzureStackHCILoadBalancerFinalizer)
 	conditions.MarkFalse(lbs.AzureStackHCILoadBalancer, infrav1.LoadBalancerInfrastructureReadyCondition, infrav1.LoadBalancerDeletingReason, clusterv1.ConditionSeverityInfo, "")
 
@@ -369,4 +382,72 @@ func (r *AzureStackHCILoadBalancerReconciler) reconcileStatus(lbs *scope.LoadBal
 	}
 
 	lbs.SetPhase(infrav1.AzureStackHCILoadBalancerPhaseProvisioned)
+}
+
+// syncLoadBalancerIPToIPAM syncs the MOC-allocated LoadBalancer IP to the K8s-based IPAM.
+// This is best-effort and non-blocking - it creates an IPClaim with a static IP annotation
+// to record the allocation in the IPAM system. This ensures that when the IPAM service is
+// enabled for a VNet, existing legacy LB allocations are properly tracked.
+func (r *AzureStackHCILoadBalancerReconciler) syncLoadBalancerIPToIPAM(lbs *scope.LoadBalancerScope, clusterScope *scope.ClusterScope) error {
+	address := lbs.Address()
+	if address == "" {
+		return nil // No address to sync
+	}
+
+	vnetName := clusterScope.Vnet().Name
+	if vnetName == "" {
+		lbs.Info("VNet name not available, skipping IPAM sync")
+		return nil
+	}
+
+	ipamService, err := caphipam.NewIPAMService(caphipam.IPAMServiceParams{
+		Client:      r.Client,
+		Logger:      lbs.Logger,
+		CloudFqdn:   clusterScope.GetCloudAgentFqdn(),
+		Authorizer:  clusterScope.GetAuthorizer(),
+		ClusterName: clusterScope.Name(),
+		Namespace:   clusterScope.Namespace(),
+		VnetName:    vnetName,
+		Owner:       lbs.AzureStackHCILoadBalancer,
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to create IPAM service")
+	}
+
+	if err := ipamService.SyncLoadBalancerIP(clusterScope.Context, address); err != nil {
+		return errors.Wrap(err, "failed to sync LoadBalancer IP to IPAM")
+	}
+
+	lbs.Info("Synced LoadBalancer IP to IPAM", "ip", address, "vnet", vnetName)
+	return nil
+}
+
+// deleteLoadBalancerIPClaim deletes the IPClaim associated with this LoadBalancer.
+// This is best-effort and non-blocking - if deletion fails, the cluster deletion continues.
+func (r *AzureStackHCILoadBalancerReconciler) deleteLoadBalancerIPClaim(lbs *scope.LoadBalancerScope, clusterScope *scope.ClusterScope) error {
+	vnetName := clusterScope.Vnet().Name
+	if vnetName == "" {
+		return nil // No VNet, no IPClaim to delete
+	}
+
+	ipamService, err := caphipam.NewIPAMService(caphipam.IPAMServiceParams{
+		Client:      r.Client,
+		Logger:      lbs.Logger,
+		CloudFqdn:   clusterScope.GetCloudAgentFqdn(),
+		Authorizer:  clusterScope.GetAuthorizer(),
+		ClusterName: clusterScope.Name(),
+		Namespace:   clusterScope.Namespace(),
+		VnetName:    vnetName,
+		Owner:       lbs.AzureStackHCILoadBalancer,
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to create IPAM service")
+	}
+
+	if err := ipamService.DeleteLoadBalancerIPClaim(clusterScope.Context); err != nil {
+		return errors.Wrap(err, "failed to delete LoadBalancer IPClaim")
+	}
+
+	lbs.Info("Deleted LoadBalancer IPClaim", "vnet", vnetName)
+	return nil
 }
