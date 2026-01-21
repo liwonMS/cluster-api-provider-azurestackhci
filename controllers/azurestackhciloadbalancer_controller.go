@@ -249,7 +249,8 @@ func (r *AzureStackHCILoadBalancerReconciler) reconcileLoadBalancerServiceStatus
 	lbSpec := &loadbalancers.Spec{
 		Name: loadBalancerScope.AzureStackHCILoadBalancer.Name,
 	}
-	lbInterface, err := loadbalancers.NewService(clusterScope).Get(clusterScope.Context, lbSpec)
+	ipamSvc := loadbalancers.NewIPAMService(clusterScope, loadBalancerScope)
+	lbInterface, err := loadbalancers.NewService(clusterScope, ipamSvc).Get(clusterScope.Context, lbSpec)
 	if err != nil {
 		return err
 	}
@@ -282,7 +283,8 @@ func (r *AzureStackHCILoadBalancerReconciler) reconcileLoadBalancerService(loadB
 		Tags:            tags,
 	}
 
-	if err := loadbalancers.NewService(clusterScope).Reconcile(clusterScope.Context, lbSpec); err != nil {
+	ipamSvc := loadbalancers.NewIPAMService(clusterScope, loadBalancerScope)
+	if err := loadbalancers.NewService(clusterScope, ipamSvc).Reconcile(clusterScope.Context, lbSpec); err != nil {
 		return errors.Wrapf(err, "failed to reconcile loadbalancer %s", loadBalancerScope.AzureStackHCILoadBalancer.Name)
 	}
 
@@ -315,7 +317,8 @@ func (r *AzureStackHCILoadBalancerReconciler) reconcileDeleteLoadBalancerService
 	lbSpec := &loadbalancers.Spec{
 		Name: loadBalancerScope.AzureStackHCILoadBalancer.Name,
 	}
-	if err := loadbalancers.NewService(clusterScope).Delete(clusterScope.Context, lbSpec); err != nil {
+	ipamSvc := loadbalancers.NewIPAMService(clusterScope, loadBalancerScope)
+	if err := loadbalancers.NewService(clusterScope, ipamSvc).Delete(clusterScope.Context, lbSpec); err != nil {
 		if !azurestackhci.ResourceNotFound(err) {
 			return errors.Wrapf(err, "failed to delete loadbalancer %s", loadBalancerScope.AzureStackHCILoadBalancer.Name)
 		}
