@@ -5,19 +5,19 @@ go 1.24.4
 require (
 	//dev.azure.com/msazure/One/_git/azlocal-overlay.git/api v0.0.0
 	//dev.azure.com/msazure/msk8s/_git/azstackhci-operator.git v0.11.1-alpha.34
-	dev.azure.com/msazure/msk8s/_git/azstackhci-operator.git/pkg/ipam v0.0.0
+	dev.azure.com/msazure/msk8s/_git/azstackhci-operator.git/pkg/ipam v0.0.0-20260120073739-5abb75b9fa43
 	github.com/Azure/go-autorest/autorest/to v0.4.0
 	github.com/blang/semver v3.5.1+incompatible
 	github.com/go-logr/logr v1.4.3
 	github.com/golang/mock v1.6.0
-	github.com/microsoft/moc v0.31.1
-	github.com/microsoft/moc-sdk-for-go v0.24.2
+	github.com/microsoft/moc v0.39.1-0.20260115053637-b2f199790000
+	github.com/microsoft/moc-sdk-for-go v0.39.1-0.20260115055031-9b3766100f0b
 	github.com/onsi/ginkgo/v2 v2.23.4
 	github.com/onsi/gomega v1.36.3
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/pflag v1.0.6
-	golang.org/x/crypto v0.44.0
-	google.golang.org/grpc v1.72.0
+	golang.org/x/crypto v0.46.0
+	google.golang.org/grpc v1.76.0
 	k8s.io/api v0.32.5
 	k8s.io/apimachinery v0.32.5
 	k8s.io/client-go v0.32.3
@@ -84,17 +84,17 @@ require (
 	go.opentelemetry.io/otel v1.29.0 // indirect
 	go.opentelemetry.io/otel/trace v1.29.0 // indirect
 	go.uber.org/automaxprocs v1.6.0 // indirect
-	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/oauth2 v0.28.0 // indirect
-	golang.org/x/sync v0.18.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
-	golang.org/x/term v0.37.0 // indirect
-	golang.org/x/text v0.31.0 // indirect
+	golang.org/x/net v0.48.0 // indirect
+	golang.org/x/oauth2 v0.30.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
+	golang.org/x/sys v0.39.0 // indirect
+	golang.org/x/term v0.38.0 // indirect
+	golang.org/x/text v0.33.0 // indirect
 	golang.org/x/time v0.9.0 // indirect
-	golang.org/x/tools v0.38.0 // indirect
+	golang.org/x/tools v0.40.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250428153025-10db94c68c34 // indirect
-	google.golang.org/protobuf v1.36.6 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260114163908-3f89685c29c3 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
@@ -110,7 +110,6 @@ require (
 )
 
 replace (
-	dev.azure.com/msazure/msk8s/_git/azstackhci-operator.git/pkg/ipam => ../azstackhci-operator/pkg/ipam
 	github.com/dgrijalva/jwt-go => github.com/golang-jwt/jwt/v4 v4.1.0
 	github.com/elazarl/goproxy => github.com/elazarl/goproxy v0.0.0-20230731152917-f99041a5c027
 	github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
