@@ -58,6 +58,8 @@ func (w *CAPHTelemetryWriter) WriteIPAMOperationLog(logger logr.Logger, operatio
 		params,
 		err,
 	)
+
+	logger.Info("IPAM operation Recorded")
 }
 
 // IPAMService wraps ipam.IPAMService for CAPH-specific functionality.
@@ -92,7 +94,7 @@ func (s *IPAMService) AllocateNicIPClaim(ctx context.Context, mocNic network.Int
 	var errs error
 	for index, ipconfig := range *mocNic.IPConfigurations {
 		claimName := ipam.GenerateNICIPClaimName(*mocNic.Name, index)
-		if allocatedIP, err := s.AllocateIP(ctx, claimName, staticIPAddress); err != nil {
+		if allocatedIP, err := s.AllocateIP(ctx, claimName, staticIPAddress, false); err != nil {
 			errs = multierr.Append(errs, err)
 		} else {
 			ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress = to.StringPtr(allocatedIP)
@@ -106,7 +108,7 @@ func (s *IPAMService) SyncNicIPClaim(ctx context.Context, mocNic network.Interfa
 	var errs error
 	for index, ipconfig := range *mocNic.IPConfigurations {
 		claimName := ipam.GenerateNICIPClaimName(*mocNic.Name, index)
-		if err := s.SyncIPClaim(ctx, claimName, *(ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress)); err != nil {
+		if err := s.SyncIPClaim(ctx, claimName, *(ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress), false); err != nil {
 			errs = multierr.Append(errs, err)
 		}
 	}
