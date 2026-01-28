@@ -92,12 +92,12 @@ func NewIPAMService(vmscope *scope.VirtualMachineScope) *IPAMService {
 // AllocateNicIPClaim allocates IPClaims for all IP configurations on a NIC.
 func (s *IPAMService) AllocateNicIPClaim(ctx context.Context, mocNic network.Interface, staticIPAddress string) error {
 	var errs error
-	for index, ipconfig := range *mocNic.IPConfigurations {
+	for index := range *mocNic.IPConfigurations {
 		claimName := ipam.GenerateNICIPClaimName(*mocNic.Name, index)
 		if allocatedIP, err := s.AllocateIP(ctx, claimName, staticIPAddress, false); err != nil {
 			errs = multierr.Append(errs, err)
 		} else {
-			ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress = to.StringPtr(allocatedIP)
+			(*mocNic.IPConfigurations)[index].InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress = to.StringPtr(allocatedIP)
 		}
 	}
 	return errs
@@ -106,10 +106,13 @@ func (s *IPAMService) AllocateNicIPClaim(ctx context.Context, mocNic network.Int
 // SyncNicIPClaim syncs IPClaims for all IP configurations on a NIC.
 func (s *IPAMService) SyncNicIPClaim(ctx context.Context, mocNic network.Interface) error {
 	var errs error
-	for index, ipconfig := range *mocNic.IPConfigurations {
+	for index := range *mocNic.IPConfigurations {
 		claimName := ipam.GenerateNICIPClaimName(*mocNic.Name, index)
-		if err := s.SyncIPClaim(ctx, claimName, *(ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress), false); err != nil {
-			errs = multierr.Append(errs, err)
+		ipconfig := (*mocNic.IPConfigurations)[index]
+		if ipconfig.InterfaceIPConfigurationPropertiesFormat != nil && ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress != nil {
+			if err := s.SyncIPClaim(ctx, claimName, *(ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress), false); err != nil {
+				errs = multierr.Append(errs, err)
+			}
 		}
 	}
 	return errs
