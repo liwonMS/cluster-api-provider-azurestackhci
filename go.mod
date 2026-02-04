@@ -5,7 +5,7 @@ go 1.24.4
 require (
 	//dev.azure.com/msazure/One/_git/azlocal-overlay.git/api v0.0.0
 	//dev.azure.com/msazure/msk8s/_git/azstackhci-operator.git v0.11.1-alpha.34
-	dev.azure.com/msazure/msk8s/_git/azstackhci-operator.git/pkg/ipam v0.0.0-20260123040738-9949d566a07b
+	dev.azure.com/msazure/msk8s/_git/azstackhci-operator.git/pkg/ipam v0.0.0-20260204063851-f4529692115c
 	github.com/Azure/go-autorest/autorest/to v0.4.0
 	github.com/blang/semver v3.5.1+incompatible
 	github.com/go-logr/logr v1.4.3
