@@ -196,6 +196,13 @@ func (s *Service) handleIPAddressConflictRetry(ctx context.Context, vnicSpec *Sp
 	}
 	logger.Info("IP allocated by IPAM is already taken in Moc, retrying", "Conflicted IP", conflictedIP)
 
+	// Clean up the failed IPClaim with the conflicting IP
+	if s.IPAMService != nil {
+		if err := s.IPAMService.DeleteNicIPClaim(ctx, vnicSpec); err != nil {
+			logger.Error(err, "Failed to delete IPClaim after IP conflict")
+		}
+	}
+
 	// Remove the failed mocnetworkinterface
 	if err := s.Delete(ctx, vnicSpec); err != nil {
 		return nil, err
