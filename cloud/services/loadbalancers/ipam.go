@@ -23,7 +23,7 @@ import (
 
 	"github.com/go-logr/logr"
 
-	ipam "dev.azure.com/msazure/msk8s/_git/azstackhci-operator.git/pkg/ipam"
+	ipam "github.com/microsoft/cluster-api-provider-azurestackhci/pkg/ipam"
 	"github.com/microsoft/cluster-api-provider-azurestackhci/cloud/scope"
 	"github.com/microsoft/cluster-api-provider-azurestackhci/cloud/telemetry"
 )
