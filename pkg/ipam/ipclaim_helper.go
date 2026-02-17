@@ -166,7 +166,7 @@ func NewIPAMService(config IPAMServiceConfig) *IPAMService {
 		logger:           config.Logger,
 		cloudFqdn:        config.CloudFqdn,
 		authorizer:       config.Authorizer,
-		namespace:        config.Namespace,
+		namespace:        "default",
 		vnetName:         config.VnetName,
 		clusterName:      config.ClusterName,
 		creatorID:        creatorID,
