@@ -204,7 +204,7 @@ func (s *Service) handleIPAddressConflictRetry(ctx context.Context, vnicSpec *Sp
 	}
 
 	// Remove the failed mocnetworkinterface
-	if err := s.Delete(ctx, vnicSpec); err != nil {
+	if err := s.Delete(ctx, vnicSpec); err != nil && !azurestackhci.ResourceNotFound(err) {
 		return nil, err
 	}
 
