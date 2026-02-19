@@ -521,7 +521,7 @@ func (s *IPAMService) waitForIPAllocation(ctx context.Context, claimName string)
 
 	var allocatedIP string
 	var lastError string // Track the last issue for better error reporting
-	
+
 	pollErr := wait.PollUntilContextTimeout(timeoutCtx, IPClaimPollInterval, IPClaimTimeout, true, func(ctx context.Context) (bool, error) {
 		claim := &ipamv1.IPAddressClaim{}
 		if err := s.client.Get(ctx, namespacedName, claim); err != nil {

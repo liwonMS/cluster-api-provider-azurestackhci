@@ -23,9 +23,9 @@ import (
 
 	"github.com/go-logr/logr"
 
-	ipam "github.com/microsoft/cluster-api-provider-azurestackhci/pkg/ipam"
 	"github.com/microsoft/cluster-api-provider-azurestackhci/cloud/scope"
 	"github.com/microsoft/cluster-api-provider-azurestackhci/cloud/telemetry"
+	ipam "github.com/microsoft/cluster-api-provider-azurestackhci/pkg/ipam"
 )
 
 // Annotation for marking LoadBalancer IP claims

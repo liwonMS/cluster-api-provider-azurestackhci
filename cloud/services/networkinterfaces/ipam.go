@@ -25,9 +25,9 @@ import (
 	"github.com/microsoft/moc-sdk-for-go/services/network"
 	"go.uber.org/multierr"
 
-	ipam "github.com/microsoft/cluster-api-provider-azurestackhci/pkg/ipam"
 	"github.com/microsoft/cluster-api-provider-azurestackhci/cloud/scope"
 	"github.com/microsoft/cluster-api-provider-azurestackhci/cloud/telemetry"
+	ipam "github.com/microsoft/cluster-api-provider-azurestackhci/pkg/ipam"
 )
 
 // CAPHTelemetryWriter implements ipam.IPAMTelemetryWriter for CAPH.
