@@ -23,6 +23,7 @@ import (
 	"github.com/microsoft/moc-sdk-for-go/services/network"
 	"github.com/microsoft/moc-sdk-for-go/services/network/virtualnetwork"
 	"github.com/microsoft/moc/pkg/auth"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -72,6 +73,10 @@ const (
 
 	// ReadyConditionType is the condition type for ready status (matches clusterv1.ReadyCondition)
 	ReadyConditionType = "Ready"
+
+	// Deployment name and namespace for detecting azstackhci-operator presence
+	azstackhciOperatorDeploymentName      = "azstackhci-operator-controller-manager"
+	azstackhciOperatorDeploymentNamespace = "azstackhci-operator-system"
 )
 
 // =============================================================================
@@ -365,7 +370,7 @@ func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP st
 	if enabledErr != nil {
 		return enabledErr
 	}
-	
+
 	if !enableIPAMAllocation {
 		return nil
 	}
@@ -440,6 +445,27 @@ func (s *IPAMService) GetVnetName() string {
 // GetClusterName returns the configured cluster name.
 func (s *IPAMService) GetClusterName() string {
 	return s.clusterName
+}
+
+// ShouldIPAMBeSoleAllocator determines whether IPAM should be the sole IP allocator
+func ShouldIPAMBeSoleAllocator(ctx context.Context, c client.Client) bool {
+	deployment := &appsv1.Deployment{}
+	key := types.NamespacedName{
+		Name:      azstackhciOperatorDeploymentName,
+		Namespace: azstackhciOperatorDeploymentNamespace,
+	}
+
+	err := c.Get(ctx, key, deployment)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// azstackhci-operator not deployed → azlocal-overlay extension → IPAM sole allocator
+			return true
+		}
+		// API error → assume 2607 → keep MOC fallback
+		return false
+	}
+	// azstackhci-operator deployed → 2607 → keep MOC fallback
+	return false
 }
 
 // =============================================================================
