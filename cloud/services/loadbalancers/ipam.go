@@ -103,7 +103,7 @@ func generateLegacyLoadBalancerIPClaimName(clusterName string) string {
 // to record the allocation in the K8s-based IPAM system.
 func (s *IPAMService) SyncLoadBalancerIP(ctx context.Context, mocAllocatedIP string) error {
 	claimName := generateLegacyLoadBalancerIPClaimName(s.clusterName)
-	return s.IPAMService.SyncIPClaim(ctx, claimName, mocAllocatedIP, true)
+	return s.IPAMService.SyncIPClaim(ctx, claimName, mocAllocatedIP)
 }
 
 // DeleteLoadBalancerIPClaim deletes the legacy LB IP claim (used during cleanup).

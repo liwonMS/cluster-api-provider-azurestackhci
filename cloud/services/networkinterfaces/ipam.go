@@ -94,7 +94,7 @@ func (s *IPAMService) AllocateNicIPClaim(ctx context.Context, mocNic network.Int
 	var errs error
 	for index := range *mocNic.IPConfigurations {
 		claimName := ipam.GenerateNICIPClaimName(*mocNic.Name, index)
-		if allocatedIP, err := s.AllocateIP(ctx, claimName, staticIPAddress, false); err != nil {
+		if allocatedIP, err := s.AllocateIP(ctx, claimName, staticIPAddress); err != nil {
 			errs = multierr.Append(errs, err)
 		} else {
 			(*mocNic.IPConfigurations)[index].InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress = to.StringPtr(allocatedIP)
@@ -110,7 +110,7 @@ func (s *IPAMService) SyncNicIPClaim(ctx context.Context, mocNic network.Interfa
 		claimName := ipam.GenerateNICIPClaimName(*mocNic.Name, index)
 		ipconfig := (*mocNic.IPConfigurations)[index]
 		if ipconfig.InterfaceIPConfigurationPropertiesFormat != nil && ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress != nil {
-			if err := s.SyncIPClaim(ctx, claimName, *(ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress), false); err != nil {
+			if err := s.SyncIPClaim(ctx, claimName, *(ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress)); err != nil {
 				errs = multierr.Append(errs, err)
 			}
 		}
