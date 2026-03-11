@@ -175,28 +175,30 @@ func NewIPAMService(config IPAMServiceConfig) *IPAMService {
 	}
 }
 
-// IsIPAMEnabled checks if IPAM is enabled for the configured VNet.
-func (s *IPAMService) IsIPAMEnabled(ctx context.Context, isLoadBalancerIP bool) bool {
+// isIPAMAllocationEnabled determines whether IPAM allocation should proceed for the configured VNet.
+// It returns (true, nil) when the VNet is configured for static IP allocation and IPAM should be used.
+// It returns (false, nil) when IPAM should be skipped (e.g., management VNet, no subnets, non-static allocation).
+// It returns (false, error) when the check cannot be performed due to missing MOC connection configuration
+// or failure to establish a VNet client connection.
+func (s *IPAMService) isIPAMAllocationEnabled(ctx context.Context) (bool, error) {
 	if s.vnetName == ManagementVnetName {
 		s.logger.Info("Management VNet detected, skipping IPAM", "vnetName", s.vnetName)
-		return false
+		return false, nil
 	}
 
 	if s.cloudFqdn == "" || s.authorizer == nil {
-		s.logger.Info("MOC connection not configured, skipping IPAM", "vnetName", s.vnetName)
-		return false
+		return false, fmt.Errorf("MOC connection not configured: cloudFqdn=%q, authorizerPresent=%v", s.cloudFqdn, s.authorizer != nil)
 	}
 
 	vnetsClient, err := virtualnetwork.NewVirtualNetworkClient(s.cloudFqdn, s.authorizer)
 	if err != nil {
-		s.logger.Error(err, "Failed to create VNet client, skipping IPAM")
-		return false
+		return false, fmt.Errorf("failed to create VNet client: %w", err)
 	}
 
 	vnets, err := vnetsClient.Get(ctx, ArcVMLnetMocResourceGroup, s.vnetName)
 	if err != nil || vnets == nil || len(*vnets) == 0 {
 		s.logger.Error(err, "Failed to get VNet from MOC, skipping IPAM", "vnetName", s.vnetName)
-		return false
+		return false, nil
 	}
 
 	vnet := (*vnets)[0]
@@ -204,36 +206,31 @@ func (s *IPAMService) IsIPAMEnabled(ctx context.Context, isLoadBalancerIP bool) 
 		vnet.VirtualNetworkPropertiesFormat.Subnets == nil ||
 		len(*vnet.VirtualNetworkPropertiesFormat.Subnets) == 0 {
 		s.logger.Info("VNet has no subnets, skipping IPAM", "vnetName", s.vnetName)
-		return false
+		return false, nil
 	}
 
 	firstSubnet := (*vnet.VirtualNetworkPropertiesFormat.Subnets)[0]
 	if firstSubnet.IPAllocationMethod != network.Static {
 		s.logger.Info("VNet subnet not configured for Static IP allocation, skipping IPAM",
 			"vnetName", s.vnetName, "allocationMethod", firstSubnet.IPAllocationMethod)
-		return false
-	}
-
-	// For Nic creation, check for SDN VNet v2 - IPAM not supported in this mode
-	// load balancer IPs only use SDN for V2 API version. By default, all LB requests are V1.
-	// so they are never skipped.
-	if !isLoadBalancerIP {
-		if vnet.NetworkControllerConfig != nil && vnet.NetworkControllerConfig.IsSdnVnetV2Enabled {
-			s.logger.Info("VNet SDN is enabled, skipping IPAM", "vnetName", s.vnetName)
-			return false
-		}
+		return false, nil
 	}
 
 	s.logger.Info("VNet configured for Static IP allocation, proceeding with IPAM", "vnetName", s.vnetName)
-	return true
+	return true, nil
 }
 
 // AllocateIP allocates an IP address using IPAM.
 // Returns the allocated IP address, or empty string if IPAM is not enabled.
-func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP string, isLoadBalancerIP bool) (string, error) {
+func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP string) (string, error) {
 	logger := s.logger.WithValues("operation", "AllocateIP", "claimName", claimName)
 
-	if !s.IsIPAMEnabled(ctx, isLoadBalancerIP) {
+	enableIPAMAllocation, err := s.isIPAMAllocationEnabled(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	if !enableIPAMAllocation {
 		logger.Info("IPAM not enabled for VNet, skipping allocation")
 		return "", nil
 	}
@@ -263,6 +260,16 @@ func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP
 // DeleteIPClaim deletes an IPAddressClaim by name and waits for deletion to complete.
 func (s *IPAMService) DeleteIPClaim(ctx context.Context, claimName string) (err error) {
 	logger := s.logger.WithValues("operation", "DeleteIPClaim", "claimName", claimName)
+
+	enableIPAMAllocation, err := s.isIPAMAllocationEnabled(ctx)
+	if err != nil {
+		return err
+	}
+
+	if !enableIPAMAllocation {
+		logger.Info("IPAM not enabled for VNet, skipping IPAM operation")
+		return nil
+	}
 
 	defer func() {
 		s.telemetryWriter.WriteIPAMOperationLog(logger, OperationDelete, claimName, nil, err)
@@ -317,7 +324,7 @@ func (s *IPAMService) ensureIPClaimDeleted(ctx context.Context, claimName string
 
 // SyncIPClaim creates/syncs an IPClaim with an externally allocated IP.
 // This is best-effort and non-blocking (doesn't wait for allocation status).
-func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP string, isLoadBalancerIP bool) error {
+func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP string) error {
 	logger := s.logger.WithValues("operation", "SyncIPClaim", "claimName", claimName, "ip", allocatedIP, "vnetName", s.vnetName)
 
 	if allocatedIP == "" || s.vnetName == ManagementVnetName {
@@ -354,7 +361,12 @@ func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP st
 	}
 
 	// Only check with MOC if necessary as the call is expensive
-	if !s.IsIPAMEnabled(ctx, isLoadBalancerIP) {
+	enableIPAMAllocation, enabledErr := s.isIPAMAllocationEnabled(ctx)
+	if enabledErr != nil {
+		return enabledErr
+	}
+	
+	if !enableIPAMAllocation {
 		return nil
 	}
 
