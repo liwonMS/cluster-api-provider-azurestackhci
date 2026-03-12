@@ -79,6 +79,8 @@ func (r *AzureStackHCIVirtualMachineReconciler) ConstructLogger(req *reconcile.R
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=azurestackhcivirtualmachines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=azurestackhcivirtualmachines/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=ipam.cluster.x-k8s.io,resources=ipaddressclaims,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=ipam.cluster.x-k8s.io,resources=ipaddresses,verbs=get;list;watch
 
 // Reconcile reacts to some event on the kubernetes object that the controller has registered to handle
 func (r *AzureStackHCIVirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
