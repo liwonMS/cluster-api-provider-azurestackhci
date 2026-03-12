@@ -90,11 +90,17 @@ func NewIPAMService(vmscope *scope.VirtualMachineScope) *IPAMService {
 }
 
 // AllocateNicIPClaim allocates IPClaims for all IP configurations on a NIC.
-func (s *IPAMService) AllocateNicIPClaim(ctx context.Context, mocNic network.Interface, staticIPAddress string) error {
+func (s *IPAMService) AllocateNicIPClaim(ctx context.Context, mocGroup string, mocNic network.Interface, staticIPAddress string) error {
+	mocAnnotations := map[string]string{
+		ipam.AnnotationMocGroupName:    mocGroup,
+		ipam.AnnotationMocResourceName: *mocNic.Name,
+		ipam.AnnotationMocResourceType: ipam.MocResourceTypeNIC,
+	}
+
 	var errs error
 	for index := range *mocNic.IPConfigurations {
 		claimName := ipam.GenerateNICIPClaimName(*mocNic.Name, index)
-		if allocatedIP, err := s.AllocateIP(ctx, claimName, staticIPAddress); err != nil {
+		if allocatedIP, err := s.AllocateIP(ctx, claimName, staticIPAddress, mocAnnotations); err != nil {
 			errs = multierr.Append(errs, err)
 		} else {
 			(*mocNic.IPConfigurations)[index].InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress = to.StringPtr(allocatedIP)
@@ -104,13 +110,19 @@ func (s *IPAMService) AllocateNicIPClaim(ctx context.Context, mocNic network.Int
 }
 
 // SyncNicIPClaim syncs IPClaims for all IP configurations on a NIC.
-func (s *IPAMService) SyncNicIPClaim(ctx context.Context, mocNic network.Interface) error {
+func (s *IPAMService) SyncNicIPClaim(ctx context.Context, mocGroup string, mocNic network.Interface) error {
+	mocAnnotations := map[string]string{
+		ipam.AnnotationMocGroupName:    mocGroup,
+		ipam.AnnotationMocResourceName: *mocNic.Name,
+		ipam.AnnotationMocResourceType: ipam.MocResourceTypeNIC,
+	}
+
 	var errs error
 	for index := range *mocNic.IPConfigurations {
 		claimName := ipam.GenerateNICIPClaimName(*mocNic.Name, index)
 		ipconfig := (*mocNic.IPConfigurations)[index]
 		if ipconfig.InterfaceIPConfigurationPropertiesFormat != nil && ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress != nil {
-			if err := s.SyncIPClaim(ctx, claimName, *(ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress)); err != nil {
+			if err := s.SyncIPClaim(ctx, claimName, *(ipconfig.InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress), mocAnnotations); err != nil {
 				errs = multierr.Append(errs, err)
 			}
 		}

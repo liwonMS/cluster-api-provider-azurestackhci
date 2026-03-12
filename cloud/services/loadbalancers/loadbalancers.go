@@ -130,7 +130,12 @@ func (s *Service) syncLoadBalancerIPToIPAM(ctx context.Context, lb network.LoadB
 		return
 	}
 
-	if err := s.IPAMService.SyncLoadBalancerIP(ctx, ip); err != nil {
+	mocGroup := s.Scope.GetResourceGroup()
+	lbName := ""
+	if lb.Name != nil {
+		lbName = *lb.Name
+	}
+	if err := s.IPAMService.SyncLoadBalancerIP(ctx, mocGroup, lbName, ip); err != nil {
 		s.Scope.GetLogger().Info("Failed to sync LoadBalancer IP to IPAM", "error", err, "ip", ip)
 		// Non-blocking - don't fail LB reconcile
 	}

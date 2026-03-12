@@ -76,7 +76,7 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 		// Sync back to IPAM to ensure claim exists
 		s.Scope.GetLogger().Info("Nic exists, attempting to sync IPClaim", "name", nicSpec.Name)
 		mocNic := nic.(network.Interface)
-		if err := s.IPAMService.SyncNicIPClaim(ctx, mocNic); err != nil {
+		if err := s.IPAMService.SyncNicIPClaim(ctx, s.Scope.GetResourceGroup(), mocNic); err != nil {
 			s.Scope.GetLogger().Info("Failed to sync IPClaim during reconcile", "error", err)
 			// Non-blocking - don't fail NIC reconcile
 		}
@@ -139,7 +139,7 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 
 	// assign ipam IP to the moc nic object.
 	if s.IPAMService != nil {
-		if err := s.IPAMService.AllocateNicIPClaim(ctx, networkInterface, nicSpec.StaticIPAddress); err != nil {
+		if err := s.IPAMService.AllocateNicIPClaim(ctx, s.Scope.GetResourceGroup(), networkInterface, nicSpec.StaticIPAddress); err != nil {
 			logger.Error(err, "Failed to allocate IPClaim for network interface", "name", nicSpec.Name)
 			// Best-effort - continue with NIC creation
 		}
@@ -164,7 +164,7 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 	}
 
 	if s.IPAMService != nil {
-		if err := s.IPAMService.SyncNicIPClaim(ctx, *createdNic); err != nil {
+		if err := s.IPAMService.SyncNicIPClaim(ctx, s.Scope.GetResourceGroup(), *createdNic); err != nil {
 			logger.Info("Failed to sync IPClaim after NIC creation", "error", err)
 			// Non-blocking - don't fail NIC reconcile
 		}

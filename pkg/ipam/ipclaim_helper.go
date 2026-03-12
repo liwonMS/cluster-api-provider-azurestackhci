@@ -50,20 +50,27 @@ const (
 
 	// IPClaim annotations
 	AnnotationIPClaimCreatedBy       = AzstackhciAPIGroup + "/created-by"
-	AnnotationIPClaimStaticIP        = "ipam." + AzstackhciAPIGroup + "/requested-ip"
-	AnnotationIPClaimControlPlaneVIP = "ipam." + AzstackhciAPIGroup + "/control-plane-vip"
-	AnnotationLogicalNetworkName     = "ipam." + AzstackhciAPIGroup + "/logicalNetworkName"
+	AnnotationIPClaimStaticIP    = "ipam." + AzstackhciAPIGroup + "/requested-ip"
+	AnnotationLogicalNetworkName = "ipam." + AzstackhciAPIGroup + "/logicalNetworkName"
 	AnnotationSubnetName             = "ipam." + AzstackhciAPIGroup + "/subnetName"
 	AnnotationAllocationSource       = "ipam." + AzstackhciAPIGroup + "/allocation-source"
 
+	// MOC resource annotations for tracking the underlying MOC resource associated with an IPClaim
+	AnnotationMocGroupName    = AzstackhciAPIGroup + "/moc-group-name"
+	AnnotationMocResourceName = AzstackhciAPIGroup + "/moc-resource-name"
+	AnnotationMocResourceType = AzstackhciAPIGroup + "/moc-resource-type"
+
+	// MOC resource type values
+	MocResourceTypeNIC          = "nic"
+	MocResourceTypeLoadBalancer = "load-balancer"
+
 	// Allocation source values - indicates whether IP was allocated by IPAM operator or MOC IPAM
-	AllocationSourceOperatorIPAM = "operator-ipam" // IP was allocated directly by IPAM operator
+	AllocationSourceOperatorIPAM = "ipam-operator" // IP was allocated directly by IPAM operator
 	AllocationSourceMOCIPAM      = "moc-ipam"      // IP was allocated by MOC IPAM, then synced for tracking
 
 	// Creator identifiers for tracking which component created the claim
-	IPClaimCreatorCAPH       = "caph"
-	IPClaimCreatorCloudOp    = "cloud-operator"
-	IPClaimCreatorAzstackhci = "azstackhci-operator"
+	IPClaimCreatorCAPH    = "caph"
+	IPClaimCreatorCloudOp = "cloud-operator"
 
 	// IPClaimPollInterval is how often to check IPAddressClaim status
 	IPClaimPollInterval = 100 * time.Millisecond
@@ -128,9 +135,6 @@ type IPAMServiceConfig struct {
 	// Optional fields for IP claim creation
 	ClusterName string
 	CreatorID   string // e.g., IPClaimCreatorCAPH, IPClaimCreatorCloudOp
-
-	// Optional extra annotations to add to all IP claims
-	ExtraAnnotations map[string]string
 }
 
 // IPAMService provides high-level IPAM operations with built-in telemetry support.
@@ -144,12 +148,11 @@ type IPAMService struct {
 	cloudFqdn  string
 	authorizer auth.Authorizer
 
-	namespace        string
-	vnetName         string
-	clusterName      string
-	creatorID        string
-	owner            client.Object
-	extraAnnotations map[string]string
+	namespace   string
+	vnetName    string
+	clusterName string
+	creatorID   string
+	owner       client.Object
 }
 
 // NewIPAMService creates a new IPAMService with the given configuration.
@@ -160,23 +163,17 @@ func NewIPAMService(config IPAMServiceConfig) *IPAMService {
 		telemetryWriter = &noOpTelemetryWriter{}
 	}
 
-	creatorID := config.CreatorID
-	if creatorID == "" {
-		creatorID = IPClaimCreatorAzstackhci
-	}
-
 	return &IPAMService{
-		client:           config.Client,
-		telemetryWriter:  telemetryWriter,
-		logger:           config.Logger,
-		cloudFqdn:        config.CloudFqdn,
-		authorizer:       config.Authorizer,
-		namespace:        "default",
-		vnetName:         config.VnetName,
-		clusterName:      config.ClusterName,
-		creatorID:        creatorID,
-		owner:            config.Owner,
-		extraAnnotations: config.ExtraAnnotations,
+		client:          config.Client,
+		telemetryWriter: telemetryWriter,
+		logger:          config.Logger,
+		cloudFqdn:       config.CloudFqdn,
+		authorizer:      config.Authorizer,
+		namespace:       "default",
+		vnetName:        config.VnetName,
+		clusterName:     config.ClusterName,
+		creatorID:       config.CreatorID,
+		owner:           config.Owner,
 	}
 }
 
@@ -227,7 +224,7 @@ func (s *IPAMService) isIPAMAllocationEnabled(ctx context.Context) (bool, error)
 
 // AllocateIP allocates an IP address using IPAM.
 // Returns the allocated IP address, or empty string if IPAM is not enabled.
-func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP string) (string, error) {
+func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP string, additionalAnnotations ...map[string]string) (string, error) {
 	logger := s.logger.WithValues("operation", "AllocateIP", "claimName", claimName)
 
 	enableIPAMAllocation, err := s.isIPAMAllocationEnabled(ctx)
@@ -240,7 +237,7 @@ func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP
 		return "", nil
 	}
 
-	params := s.buildIPClaimParams(claimName, staticIP, AllocationSourceOperatorIPAM)
+	params := s.buildIPClaimParams(claimName, staticIP, AllocationSourceOperatorIPAM, additionalAnnotations...)
 
 	if err := s.createIPClaim(ctx, params); err != nil {
 		s.telemetryWriter.WriteIPAMOperationLog(logger, OperationCreate, claimName,
@@ -329,7 +326,7 @@ func (s *IPAMService) ensureIPClaimDeleted(ctx context.Context, claimName string
 
 // SyncIPClaim creates/syncs an IPClaim with an externally allocated IP.
 // This is best-effort and non-blocking (doesn't wait for allocation status).
-func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP string) error {
+func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP string, additionalAnnotations ...map[string]string) error {
 	logger := s.logger.WithValues("operation", "SyncIPClaim", "claimName", claimName, "ip", allocatedIP, "vnetName", s.vnetName)
 
 	if allocatedIP == "" || s.vnetName == ManagementVnetName {
@@ -378,7 +375,7 @@ func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP st
 	// Just create, not waiting for completion
 	// Note: If an IPClaim already existed with a mismatched IP, it was deleted above and
 	// recreated here with AllocationSourceMOCIPAM, correctly reflecting that the final IP came from MOC.
-	params := s.buildIPClaimParams(claimName, allocatedIP, AllocationSourceMOCIPAM)
+	params := s.buildIPClaimParams(claimName, allocatedIP, AllocationSourceMOCIPAM, additionalAnnotations...)
 	if err := s.createIPClaim(ctx, params); err != nil {
 		s.telemetryWriter.WriteIPAMOperationLog(logger, OperationSync, claimName,
 			map[string]string{"ip": allocatedIP}, err)
@@ -427,11 +424,6 @@ func (s *IPAMService) SetOwner(owner client.Object) {
 	s.owner = owner
 }
 
-// SetExtraAnnotations updates the extra annotations for new IP claims.
-func (s *IPAMService) SetExtraAnnotations(annotations map[string]string) {
-	s.extraAnnotations = annotations
-}
-
 // GetNamespace returns the configured namespace.
 func (s *IPAMService) GetNamespace() string {
 	return s.namespace
@@ -472,15 +464,17 @@ func ShouldIPAMBeSoleAllocator(ctx context.Context, c client.Client) bool {
 // Internal helpers
 // =============================================================================
 
-func (s *IPAMService) buildIPClaimParams(claimName, staticIP, allocationSource string) ipClaimParams {
+func (s *IPAMService) buildIPClaimParams(claimName, staticIP, allocationSource string, additionalAnnotations ...map[string]string) ipClaimParams {
 	annotations := map[string]string{
 		AnnotationIPClaimCreatedBy: s.creatorID,
 	}
 	if allocationSource != "" {
 		annotations[AnnotationAllocationSource] = allocationSource
 	}
-	for k, v := range s.extraAnnotations {
-		annotations[k] = v
+	for _, extra := range additionalAnnotations {
+		for k, v := range extra {
+			annotations[k] = v
+		}
 	}
 
 	return ipClaimParams{
