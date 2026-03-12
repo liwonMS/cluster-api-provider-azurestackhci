@@ -24,12 +24,11 @@ import (
 	"github.com/microsoft/moc-sdk-for-go/services/network/virtualnetwork"
 	"github.com/microsoft/moc/pkg/auth"
 	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
-	ipamv1 "sigs.k8s.io/cluster-api/exp/ipam/api/v1beta1"
+	ipamv1 "sigs.k8s.io/cluster-api/api/ipam/v1beta2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
@@ -589,7 +588,7 @@ func (s *IPAMService) waitForIPAllocation(ctx context.Context, claimName string)
 
 		// Check for failure conditions
 		for _, condition := range claim.Status.Conditions {
-			if condition.Type == ReadyConditionType && condition.Status == corev1.ConditionFalse {
+			if condition.Type == ReadyConditionType && condition.Status == metav1.ConditionFalse {
 				// This is a real failure from IPAM operator - stop polling
 				return false, fmt.Errorf("IPAM allocation failed: %s", condition.Message)
 			}

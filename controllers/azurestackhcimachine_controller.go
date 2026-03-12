@@ -23,9 +23,8 @@ import (
 
 	"fmt"
 
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/go-logr/logr"
-	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta1"
+	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta2"
 	azurestackhci "github.com/microsoft/cluster-api-provider-azurestackhci/cloud"
 	"github.com/microsoft/cluster-api-provider-azurestackhci/cloud/scope"
 	"github.com/microsoft/cluster-api-provider-azurestackhci/cloud/telemetry"
@@ -38,9 +37,9 @@ import (
 	apitypes "k8s.io/apimachinery/pkg/types"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/record"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	capierrors "sigs.k8s.io/cluster-api/errors"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util"
+	"sigs.k8s.io/cluster-api/util/conditions"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -169,6 +168,7 @@ func (r *AzureStackHCIMachineReconciler) Reconcile(ctx context.Context, req ctrl
 		Machine:              machine,
 		AzureStackHCICluster: azureStackHCICluster,
 		AzureStackHCIMachine: azureStackHCIMachine,
+		Context:              ctx,
 	})
 	if err != nil {
 		r.Recorder.Eventf(azureStackHCIMachine, corev1.EventTypeWarning, "FailureCreateMachineScope", errors.Wrapf(err, "failed to create machine scope").Error())
@@ -194,7 +194,10 @@ func (r *AzureStackHCIMachineReconciler) Reconcile(ctx context.Context, req ctrl
 func (r *AzureStackHCIMachineReconciler) reconcileNormal(machineScope *scope.MachineScope, clusterScope *scope.ClusterScope) (reconcile.Result, error) {
 	machineScope.Info("Reconciling AzureStackHCIMachine")
 	// If the AzureStackHCIMachine is in an error state, return early.
-	if machineScope.AzureStackHCIMachine.Status.FailureReason != nil || machineScope.AzureStackHCIMachine.Status.FailureMessage != nil {
+	// In v1beta2, we check conditions for error states
+	vmRunningCondition := conditions.Get(machineScope.AzureStackHCIMachine, infrav1.VMRunningCondition)
+	if vmRunningCondition != nil && vmRunningCondition.Status == metav1.ConditionFalse &&
+		(vmRunningCondition.Reason != "") {
 		machineScope.Info("Error state detected, skipping reconciliation")
 		r.Recorder.Eventf(machineScope.AzureStackHCIMachine, corev1.EventTypeWarning, "ErrorStateAzureStackHCIMachine", "AzureStackHCIMachine is in an error state")
 		return reconcile.Result{}, nil
@@ -207,12 +210,17 @@ func (r *AzureStackHCIMachineReconciler) reconcileNormal(machineScope *scope.Mac
 		return reconcile.Result{}, err
 	}
 
-	if !machineScope.Cluster.Status.InfrastructureReady {
+	// Check if the infrastructure cluster is ready by checking our own AzureStackHCICluster status
+	if clusterScope.AzureStackHCICluster.Status.Initialization == nil ||
+		clusterScope.AzureStackHCICluster.Status.Initialization.Provisioned == nil ||
+		!*clusterScope.AzureStackHCICluster.Status.Initialization.Provisioned {
 		machineScope.Info("Cluster infrastructure is not ready yet")
 		return reconcile.Result{}, nil
 	}
 
 	// Make sure bootstrap data is available and populated.
+	// NOTE: CAPI's Machine controller populates DataSecretName via the bootstrap phase
+	// independently of InfraMachine's Provisioned status, so no circular dependency exists.
 	if machineScope.Machine.Spec.Bootstrap.DataSecretName == nil {
 		machineScope.Info("Bootstrap data secret reference is not yet available")
 		return reconcile.Result{}, nil
@@ -237,7 +245,12 @@ func (r *AzureStackHCIMachineReconciler) reconcileNormal(machineScope *scope.Mac
 	// TODO(vincepri): Remove this annotation when clusterctl is no longer relevant.
 	machineScope.SetAnnotation("cluster-api-provider-azurestackhci", "true")
 
-	machineScope.AzureStackHCIMachine.Status.Conditions = append(machineScope.AzureStackHCIMachine.Status.Conditions, vm.Status.Conditions...)
+	// Merge VM conditions into the Machine using conditions.Set (update and insert by type)
+	// to avoid duplicating conditions on every reconcile, which would cause
+	// infinite growth and a hot reconcile loop.
+	for _, vmCond := range vm.Status.Conditions {
+		conditions.Set(machineScope.AzureStackHCIMachine, vmCond)
+	}
 
 	if vm.Status.VMState == nil {
 		machineScope.Info("Waiting for VM controller to set vm state")
@@ -251,11 +264,25 @@ func (r *AzureStackHCIMachineReconciler) reconcileNormal(machineScope *scope.Mac
 	case infrav1.VMStateSucceeded:
 		machineScope.Info("Machine VM is running", "name", vm.Name)
 		machineScope.SetReady()
+		conditions.Set(machineScope.AzureStackHCIMachine, metav1.Condition{
+			Type:   infrav1.VMRunningCondition,
+			Status: metav1.ConditionTrue,
+			Reason: "VMRunning",
+		})
 	case infrav1.VMStateUpdating:
 		machineScope.Info("Machine VM is updating", "name", vm.Name)
+		conditions.Set(machineScope.AzureStackHCIMachine, metav1.Condition{
+			Type:   infrav1.VMRunningCondition,
+			Status: metav1.ConditionFalse,
+			Reason: "VMUpdating",
+		})
 	default:
-		machineScope.SetFailureReason(capierrors.UpdateMachineError)
-		machineScope.SetFailureMessage(errors.Errorf("AzureStackHCI VM state %q is unexpected", *machineScope.GetVMState()))
+		conditions.Set(machineScope.AzureStackHCIMachine, metav1.Condition{
+			Type:    infrav1.VMRunningCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  infrav1.VMProvisionFailedReason,
+			Message: fmt.Sprintf("AzureStackHCI VM state %q is unexpected", *machineScope.GetVMState()),
+		})
 	}
 
 	return reconcile.Result{}, nil
@@ -312,12 +339,16 @@ func (r *AzureStackHCIMachineReconciler) reconcileVirtualMachineNormal(machineSc
 		if err != nil {
 			return errors.Wrap(err, "failed to get VM image")
 		}
-		image.DeepCopyInto(&vm.Spec.Image)
+		vm.Spec.Image = image.DeepCopy()
 
 		vm.Spec.VMSize = machineScope.AzureStackHCIMachine.Spec.VMSize
 		vm.Spec.GpuCount = machineScope.AzureStackHCIMachine.Spec.GpuCount
-		machineScope.AzureStackHCIMachine.Spec.AvailabilityZone.DeepCopyInto(&vm.Spec.AvailabilityZone)
-		machineScope.AzureStackHCIMachine.Spec.OSDisk.DeepCopyInto(&vm.Spec.OSDisk)
+		if machineScope.AzureStackHCIMachine.Spec.AvailabilityZone != nil {
+			vm.Spec.AvailabilityZone = machineScope.AzureStackHCIMachine.Spec.AvailabilityZone.DeepCopy()
+		}
+		if machineScope.AzureStackHCIMachine.Spec.OSDisk != nil {
+			vm.Spec.OSDisk = machineScope.AzureStackHCIMachine.Spec.OSDisk.DeepCopy()
+		}
 		vm.Spec.Location = machineScope.AzureStackHCIMachine.Spec.Location
 		vm.Spec.SSHPublicKey = machineScope.AzureStackHCIMachine.Spec.SSHPublicKey
 		vm.Spec.BootstrapData = &bootstrapData
@@ -491,10 +522,16 @@ func (r *AzureStackHCIMachineReconciler) AzureStackHCIClusterToAzureStackHCIMach
 // Pick image from the machine configuration, or use a default one.
 func (r *AzureStackHCIMachineReconciler) getVMImage(scope *scope.MachineScope) (*infrav1.Image, error) {
 	// Use custom image if provided
-	if scope.AzureStackHCIMachine.Spec.Image.Name != nil && *scope.AzureStackHCIMachine.Spec.Image.Name != "" {
+	if scope.AzureStackHCIMachine.Spec.Image != nil &&
+		scope.AzureStackHCIMachine.Spec.Image.Name != nil &&
+		*scope.AzureStackHCIMachine.Spec.Image.Name != "" {
 		scope.Info("Using custom image name for machine", "machine", scope.AzureStackHCIMachine.GetName(), "imageName", scope.AzureStackHCIMachine.Spec.Image.Name)
-		return &scope.AzureStackHCIMachine.Spec.Image, nil
+		return scope.AzureStackHCIMachine.Spec.Image, nil
 	}
 
-	return azurestackhci.GetDefaultImage(scope.AzureStackHCIMachine.Spec.Image.OSType, to.String(scope.Machine.Spec.Version))
+	osType := infrav1.OSTypeLinux
+	if scope.AzureStackHCIMachine.Spec.Image != nil {
+		osType = scope.AzureStackHCIMachine.Spec.Image.OSType
+	}
+	return azurestackhci.GetDefaultImage(osType, scope.Machine.Spec.Version)
 }

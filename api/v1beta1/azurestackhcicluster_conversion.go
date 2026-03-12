@@ -17,8 +17,32 @@ limitations under the License.
 
 package v1beta1
 
-// Hub marks AzureStackHCICluster as a conversion hub.
-func (*AzureStackHCICluster) Hub() {}
+import (
+	"sigs.k8s.io/controller-runtime/pkg/conversion"
 
-// Hub marks AzureStackHCIClusterList as a conversion hub.
-func (*AzureStackHCIClusterList) Hub() {}
+	infrav1beta2 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta2"
+)
+
+// ConvertTo converts this v1beta1 AzureStackHCICluster to the Hub version (v1beta2).
+func (src *AzureStackHCICluster) ConvertTo(dstRaw conversion.Hub) error {
+	dst := dstRaw.(*infrav1beta2.AzureStackHCICluster)
+	return Convert_v1beta1_AzureStackHCICluster_To_v1beta2_AzureStackHCICluster(src, dst, nil)
+}
+
+// ConvertFrom converts from the Hub version (v1beta2) to this v1beta1 AzureStackHCICluster.
+func (dst *AzureStackHCICluster) ConvertFrom(srcRaw conversion.Hub) error {
+	src := srcRaw.(*infrav1beta2.AzureStackHCICluster)
+	return Convert_v1beta2_AzureStackHCICluster_To_v1beta1_AzureStackHCICluster(src, dst, nil)
+}
+
+// ConvertTo converts this v1beta1 AzureStackHCIClusterList to the Hub version (v1beta2).
+func (src *AzureStackHCIClusterList) ConvertTo(dstRaw conversion.Hub) error {
+	dst := dstRaw.(*infrav1beta2.AzureStackHCIClusterList)
+	return Convert_v1beta1_AzureStackHCIClusterList_To_v1beta2_AzureStackHCIClusterList(src, dst, nil)
+}
+
+// ConvertFrom converts from the Hub version (v1beta2) to this v1beta1 AzureStackHCIClusterList.
+func (dst *AzureStackHCIClusterList) ConvertFrom(srcRaw conversion.Hub) error {
+	src := srcRaw.(*infrav1beta2.AzureStackHCIClusterList)
+	return Convert_v1beta2_AzureStackHCIClusterList_To_v1beta1_AzureStackHCIClusterList(src, dst, nil)
+}
