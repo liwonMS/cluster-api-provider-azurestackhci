@@ -21,12 +21,12 @@ import (
 	"context"
 
 	"github.com/go-logr/logr"
-	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta1"
+	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta2"
 	"github.com/microsoft/moc/pkg/diagnostics"
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2/klogr"
 	"k8s.io/utils/pointer"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	capierrors "sigs.k8s.io/cluster-api/errors"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -102,7 +102,7 @@ func (l *LoadBalancerScope) Address() string {
 
 // OSVersion returns the AzureStackHCILoadBalancer image OS version
 func (l *LoadBalancerScope) OSVersion() string {
-	if l.AzureStackHCILoadBalancer.Spec.Image.Version != nil {
+	if l.AzureStackHCILoadBalancer.Spec.Image != nil && l.AzureStackHCILoadBalancer.Spec.Image.Version != nil {
 		return *l.AzureStackHCILoadBalancer.Spec.Image.Version
 	}
 	return ""
@@ -213,6 +213,9 @@ func (l *LoadBalancerScope) SetPort(port int32) {
 
 // GetPort returns the Port field of the AzureStackHCILoadBalancer Status.
 func (l *LoadBalancerScope) GetPort() int32 {
+	if l.AzureStackHCILoadBalancer == nil || l.AzureStackHCILoadBalancer.Status.Port == 0 {
+		return 6443
+	}
 	return l.AzureStackHCILoadBalancer.Status.Port
 }
 

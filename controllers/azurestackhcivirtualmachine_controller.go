@@ -19,6 +19,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/go-logr/logr"
 	"github.com/microsoft/cluster-api-provider-azurestackhci/cloud/scope"
@@ -29,10 +30,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	capierrors "sigs.k8s.io/cluster-api/errors"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,7 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta1"
+	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta2"
 )
 
 // AzureStackHCIVirtualMachineReconciler reconciles a AzureStackHCIVirtualMachine object
@@ -177,15 +177,27 @@ func (r *AzureStackHCIVirtualMachineReconciler) reconcileNormal(virtualMachineSc
 	case infrav1.VMStateSucceeded:
 		virtualMachineScope.Info("Machine VM is running", "name", virtualMachineScope.Name())
 		virtualMachineScope.SetReady()
-		conditions.MarkTrue(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition)
+		conditions.Set(virtualMachineScope.AzureStackHCIVirtualMachine, metav1.Condition{
+			Type:   infrav1.VMRunningCondition,
+			Status: metav1.ConditionTrue,
+			Reason: string(infrav1.VMStateSucceeded),
+		})
 	case infrav1.VMStateUpdating:
 		virtualMachineScope.Info("Machine VM is updating", "name", virtualMachineScope.Name())
-		conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.VMUpdatingReason, clusterv1.ConditionSeverityInfo, "")
+		conditions.Set(virtualMachineScope.AzureStackHCIVirtualMachine, metav1.Condition{
+			Type:    infrav1.VMRunningCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  infrav1.VMUpdatingReason,
+			Message: "",
+		})
 	default:
-		virtualMachineScope.SetFailureReason(capierrors.UpdateMachineError)
-		virtualMachineScope.SetFailureMessage(errors.Errorf("AzureStackHCI VM state %q is unexpected", vm.State))
 		r.Recorder.Eventf(virtualMachineScope.AzureStackHCIVirtualMachine, corev1.EventTypeWarning, "UnexpectedVMState", "AzureStackHCIVirtualMachine is in an unexpected state %q", vm.State)
-		conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.VMProvisionFailedReason, clusterv1.ConditionSeverityWarning, "")
+		conditions.Set(virtualMachineScope.AzureStackHCIVirtualMachine, metav1.Condition{
+			Type:    infrav1.VMRunningCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  infrav1.VMProvisionFailedReason,
+			Message: fmt.Sprintf("AzureStackHCI VM state %q is unexpected", vm.State),
+		})
 	}
 
 	return reconcile.Result{}, nil
@@ -197,7 +209,12 @@ func (r *AzureStackHCIVirtualMachineReconciler) getOrCreate(virtualMachineScope 
 	if err != nil {
 		wrappedErr := errors.Wrapf(err, "Failed to query for AzureStackHCIVirtualMachine %s/%s", virtualMachineScope.Namespace(), virtualMachineScope.Name())
 		r.Recorder.Eventf(virtualMachineScope.AzureStackHCIVirtualMachine, corev1.EventTypeWarning, "FailureQueryForVM", wrappedErr.Error())
-		conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.VMNotFoundReason, clusterv1.ConditionSeverityError, "%s", err.Error())
+		conditions.Set(virtualMachineScope.AzureStackHCIVirtualMachine, metav1.Condition{
+			Type:    infrav1.VMRunningCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  infrav1.VMNotFoundReason,
+			Message: err.Error(),
+		})
 		return nil, err
 	}
 
@@ -208,22 +225,52 @@ func (r *AzureStackHCIVirtualMachineReconciler) getOrCreate(virtualMachineScope 
 		if err != nil {
 			switch mocerrors.GetErrorCode(err) {
 			case mocerrors.OutOfMemory.Error():
-				conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.OutOfMemoryReason, clusterv1.ConditionSeverityError, "%s", err.Error())
+				conditions.Set(virtualMachineScope.AzureStackHCIVirtualMachine, metav1.Condition{
+					Type:    infrav1.VMRunningCondition,
+					Status:  metav1.ConditionFalse,
+					Reason:  infrav1.OutOfMemoryReason,
+					Message: err.Error(),
+				})
 			case mocerrors.OutOfCapacity.Error():
-				conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.OutOfCapacityReason, clusterv1.ConditionSeverityError, "%s", err.Error())
+				conditions.Set(virtualMachineScope.AzureStackHCIVirtualMachine, metav1.Condition{
+					Type:    infrav1.VMRunningCondition,
+					Status:  metav1.ConditionFalse,
+					Reason:  infrav1.OutOfCapacityReason,
+					Message: err.Error(),
+				})
 			case mocerrors.OutOfNodeCapacity.Error():
-				conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.OutOfNodeCapacityReason, clusterv1.ConditionSeverityWarning, "%s", err.Error())
+				conditions.Set(virtualMachineScope.AzureStackHCIVirtualMachine, metav1.Condition{
+					Type:    infrav1.VMRunningCondition,
+					Status:  metav1.ConditionFalse,
+					Reason:  infrav1.OutOfNodeCapacityReason,
+					Message: err.Error(),
+				})
 			case mocerrors.NotFound.Error(): // "NotFound"
 				fallthrough
 			// Internally, NotFound is a legacy error and returns the error string instead.
 			case moccodes.NotFound.String(): // "Not Found"
 				if mocerrors.IsPathNotFound(err) {
-					conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.PathNotFoundReason, clusterv1.ConditionSeverityError, "%s", err.Error())
+					conditions.Set(virtualMachineScope.AzureStackHCIVirtualMachine, metav1.Condition{
+						Type:    infrav1.VMRunningCondition,
+						Status:  metav1.ConditionFalse,
+						Reason:  infrav1.PathNotFoundReason,
+						Message: err.Error(),
+					})
 				} else {
-					conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.NotFoundReason, clusterv1.ConditionSeverityError, "%s", err.Error())
+					conditions.Set(virtualMachineScope.AzureStackHCIVirtualMachine, metav1.Condition{
+						Type:    infrav1.VMRunningCondition,
+						Status:  metav1.ConditionFalse,
+						Reason:  infrav1.NotFoundReason,
+						Message: err.Error(),
+					})
 				}
 			default:
-				conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, infrav1.VMProvisionFailedReason, clusterv1.ConditionSeverityError, "%s", err.Error())
+				conditions.Set(virtualMachineScope.AzureStackHCIVirtualMachine, metav1.Condition{
+					Type:    infrav1.VMRunningCondition,
+					Status:  metav1.ConditionFalse,
+					Reason:  infrav1.VMProvisionFailedReason,
+					Message: err.Error(),
+				})
 			}
 
 			wrappedErr := errors.Wrapf(err, "failed to create AzureStackHCIVirtualMachine")
@@ -248,12 +295,22 @@ func (r *AzureStackHCIVirtualMachineReconciler) getOrCreate(virtualMachineScope 
 func (r *AzureStackHCIVirtualMachineReconciler) reconcileDelete(virtualMachineScope *scope.VirtualMachineScope) (_ reconcile.Result, reterr error) {
 	virtualMachineScope.Info("Handling deleted AzureStackHCIVirtualMachine", "Name", virtualMachineScope.Name())
 
-	conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, clusterv1.DeletingReason, clusterv1.ConditionSeverityInfo, "")
+	conditions.Set(virtualMachineScope.AzureStackHCIVirtualMachine, metav1.Condition{
+		Type:    infrav1.VMRunningCondition,
+		Status:  metav1.ConditionFalse,
+		Reason:  "Deleting",
+		Message: "",
+	})
 
 	if err := newAzureStackHCIVirtualMachineService(virtualMachineScope).Delete(); err != nil {
 		wrappedErr := errors.Wrapf(err, "error deleting AzureStackHCIVirtualMachine %s/%s", virtualMachineScope.Namespace(), virtualMachineScope.Name())
 		r.Recorder.Eventf(virtualMachineScope.AzureStackHCIVirtualMachine, corev1.EventTypeWarning, "FailureDeleteVM", wrappedErr.Error())
-		conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, clusterv1.DeletionFailedReason, clusterv1.ConditionSeverityWarning, "%s", err.Error())
+		conditions.Set(virtualMachineScope.AzureStackHCIVirtualMachine, metav1.Condition{
+			Type:    infrav1.VMRunningCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  "DeletionFailed",
+			Message: err.Error(),
+		})
 		return reconcile.Result{}, wrappedErr
 	}
 	r.Recorder.Eventf(virtualMachineScope.AzureStackHCIVirtualMachine, corev1.EventTypeNormal, "SuccessfulDeleteVM", "Success deleting AzureStackHCIVirtualMachine %s/%s", virtualMachineScope.Namespace(), virtualMachineScope.Name())

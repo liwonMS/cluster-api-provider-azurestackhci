@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta1"
+	infrav1 "github.com/microsoft/cluster-api-provider-azurestackhci/api/v1beta2"
 	"github.com/microsoft/cluster-api-provider-azurestackhci/cloud/scope"
 	mock8sclient "github.com/microsoft/cluster-api-provider-azurestackhci/test/mocks/k8s/client"
 	. "github.com/onsi/ginkgo/v2"
@@ -12,7 +12,7 @@ import (
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apitypes "k8s.io/apimachinery/pkg/types"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )

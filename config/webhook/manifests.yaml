@@ -13,7 +13,7 @@
 #    service:
 #      name: webhook-service
 #      namespace: system
-#      path: /validate-infrastructure-cluster-x-k8s-io-v1beta1-azurestackhcimachine
+#      path: /validate-infrastructure-cluster-x-k8s-io-v1beta2-azurestackhcimachine
 #  failurePolicy: Fail
 #  matchPolicy: Equivalent
 #  name: validation.azurestackhcimachine.infrastructure.cluster.x-k8s.io
@@ -21,7 +21,7 @@
 #  - apiGroups:
 #    - infrastructure.cluster.x-k8s.io
 #    apiVersions:
-#    - v1beta1
+#    - v1beta2
 #    operations:
 #    - CREATE
 #    - UPDATE
