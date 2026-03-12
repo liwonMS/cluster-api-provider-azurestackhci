@@ -82,9 +82,6 @@ func NewIPAMService(clusterScope *scope.ClusterScope, lbScope *scope.LoadBalance
 		ClusterName:     clusterScope.Name(),
 		CreatorID:       ipam.IPClaimCreatorCAPH,
 		Owner:           lbScope.AzureStackHCILoadBalancer,
-		ExtraAnnotations: map[string]string{
-			AnnotationLegacyLoadBalancerIP: "true",
-		},
 	}
 
 	return &IPAMService{
@@ -101,9 +98,15 @@ func generateLegacyLoadBalancerIPClaimName(clusterName string) string {
 // SyncLoadBalancerIP syncs the MOC-allocated LB IP to IPAM.
 // This is best-effort and non-blocking - it creates an IPClaim with a static IP annotation
 // to record the allocation in the K8s-based IPAM system.
-func (s *IPAMService) SyncLoadBalancerIP(ctx context.Context, mocAllocatedIP string) error {
+func (s *IPAMService) SyncLoadBalancerIP(ctx context.Context, mocGroup, lbName, mocAllocatedIP string) error {
 	claimName := generateLegacyLoadBalancerIPClaimName(s.clusterName)
-	return s.IPAMService.SyncIPClaim(ctx, claimName, mocAllocatedIP)
+	lbAnnotations := map[string]string{
+		AnnotationLegacyLoadBalancerIP: "true",
+		ipam.AnnotationMocGroupName:    mocGroup,
+		ipam.AnnotationMocResourceName: lbName,
+		ipam.AnnotationMocResourceType: ipam.MocResourceTypeLoadBalancer,
+	}
+	return s.IPAMService.SyncIPClaim(ctx, claimName, mocAllocatedIP, lbAnnotations)
 }
 
 // DeleteLoadBalancerIPClaim deletes the legacy LB IP claim (used during cleanup).
