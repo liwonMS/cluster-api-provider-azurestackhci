@@ -681,8 +681,4 @@ func (s *IPAMService) waitForIPAllocation(ctx context.Context, claimName string)
 	return allocatedIP, nil
 }
 
-// =============================================================================
-// Standalone Helper Functions
-// =============================================================================
-
 
