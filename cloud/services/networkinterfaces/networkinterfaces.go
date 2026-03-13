@@ -19,7 +19,6 @@ package networkinterfaces
 
 import (
 	"context"
-	"time"
 
 	"github.com/Azure/go-autorest/autorest/to"
 	azurestackhci "github.com/microsoft/cluster-api-provider-azurestackhci/cloud"
@@ -27,7 +26,6 @@ import (
 	"github.com/microsoft/moc-sdk-for-go/services/network"
 	mocerrors "github.com/microsoft/moc/pkg/errors"
 	"github.com/pkg/errors"
-	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // Spec specification for ip configuration
@@ -263,43 +261,10 @@ func (s *Service) Delete(ctx context.Context, spec interface{}) error {
 	err := s.Client.Delete(ctx, s.Scope.GetResourceGroup(), nicSpec.Name)
 	telemetry.WriteMocOperationLog(logger, telemetry.Delete, s.Scope.GetCustomResourceTypeWithName(), telemetry.NetworkInterface,
 		telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), nicSpec.Name), nil, err)
-	if err != nil && azurestackhci.ResourceNotFound(err) {
-		return nil
-	}
 	if err != nil {
 		return errors.Wrapf(err, "failed to delete network interface %s in resource group %s", nicSpec.Name, s.Scope.GetResourceGroup())
 	}
 
-	err = s.ensureNicDeleted(ctx, nicSpec)
-	if err != nil {
-		return errors.Wrapf(err, "timed out waiting for deletion of network interface %s in resource group %s", nicSpec.Name, s.Scope.GetResourceGroup())
-	}
-
 	logger.Info("successfully deleted nic", "name", nicSpec.Name)
 	return err
-}
-
-// ensureNicDeleted ensures the network interface is deleted by polling Get with a 5 second timeout.
-func (s *Service) ensureNicDeleted(ctx context.Context, nicSpec *Spec) error {
-	logger := s.Scope.GetLogger()
-
-	pollErr := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
-		_, err := s.Get(ctx, nicSpec)
-		if err != nil {
-			if azurestackhci.ResourceNotFound(err) {
-				logger.Info("nic is deleted", "name", nicSpec.Name)
-				return true, nil // Deletion complete
-			}
-			logger.Error(err, "failed to get nic", "name", nicSpec.Name)
-			return false, err
-		}
-		logger.Info("nic still exists, waiting for deletion", "name", nicSpec.Name)
-		return false, nil // Continue polling
-	})
-
-	if pollErr != nil {
-		return errors.Wrapf(pollErr, "failed waiting for nic %s to be deleted", nicSpec.Name)
-	}
-
-	return nil
 }
