@@ -49,11 +49,11 @@ const (
 	ManagementVnetName = "vnet-arcbridge"
 
 	// IPClaim annotations
-	AnnotationIPClaimCreatedBy       = AzstackhciAPIGroup + "/created-by"
+	AnnotationIPClaimCreatedBy   = AzstackhciAPIGroup + "/created-by"
 	AnnotationIPClaimStaticIP    = "ipam." + AzstackhciAPIGroup + "/requested-ip"
 	AnnotationLogicalNetworkName = "ipam." + AzstackhciAPIGroup + "/logicalNetworkName"
-	AnnotationSubnetName             = "ipam." + AzstackhciAPIGroup + "/subnetName"
-	AnnotationAllocationSource       = "ipam." + AzstackhciAPIGroup + "/allocation-source"
+	AnnotationSubnetName         = "ipam." + AzstackhciAPIGroup + "/subnetName"
+	AnnotationAllocationSource   = "ipam." + AzstackhciAPIGroup + "/allocation-source"
 
 	// MOC resource annotations for tracking the underlying MOC resource associated with an IPClaim
 	AnnotationMocGroupName    = AzstackhciAPIGroup + "/moc-group-name"
@@ -678,5 +678,3 @@ func (s *IPAMService) waitForIPAllocation(ctx context.Context, claimName string)
 
 	return allocatedIP, nil
 }
-
-
