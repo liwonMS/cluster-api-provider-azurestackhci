@@ -303,19 +303,19 @@ func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP
 
 	if err = s.createIPClaim(ctx, params); err != nil {
 		s.telemetryWriter.WriteIPAMOperationLog(logger, OperationCreate, claimName,
-			map[string]string{"requestedIP": staticIP}, err)
+			map[string]string{"requestedIP": staticIP, "vnetName": s.vnetName}, err)
 		return "", fmt.Errorf("failed to create IPClaim: %w", err)
 	}
 
 	allocatedIP, err = s.waitForIPAllocation(ctx, claimName)
 	if err != nil {
 		s.telemetryWriter.WriteIPAMOperationLog(logger, OperationCreate, claimName,
-			map[string]string{"requestedIP": staticIP}, err)
+			map[string]string{"requestedIP": staticIP, "vnetName": s.vnetName}, err)
 		return "", fmt.Errorf("failed to allocate IP: %w", err)
 	}
 
 	s.telemetryWriter.WriteIPAMOperationLog(logger, OperationCreate, claimName,
-		map[string]string{"allocatedIP": allocatedIP, "requestedIP": staticIP}, nil)
+		map[string]string{"allocatedIP": allocatedIP, "requestedIP": staticIP, "vnetName": s.vnetName}, nil)
 
 	logger.Info("IPAM allocation successful", "ip", allocatedIP)
 	return allocatedIP, nil
@@ -437,12 +437,12 @@ func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP st
 	params := s.buildIPClaimParams(claimName, allocatedIP, AllocationSourceMOCIPAM, additionalAnnotations...)
 	if err := s.createIPClaim(ctx, params); err != nil {
 		s.telemetryWriter.WriteIPAMOperationLog(logger, OperationSync, claimName,
-			map[string]string{"ip": allocatedIP}, err)
+			map[string]string{"allocatedIP": allocatedIP, "vnetName": s.vnetName}, err)
 		return fmt.Errorf("failed to create IPClaim for sync: %w", err)
 	}
 
 	s.telemetryWriter.WriteIPAMOperationLog(logger, OperationSync, claimName,
-		map[string]string{"ip": allocatedIP}, nil)
+		map[string]string{"allocatedIP": allocatedIP, "vnetName": s.vnetName}, nil)
 	logger.Info("Syncing completes for IPClaim")
 	return nil
 }
@@ -656,7 +656,6 @@ func (s *IPAMService) waitForIPAllocation(ctx context.Context, claimName string)
 			}
 
 			allocatedIP = ipAddr.Spec.Address
-			logger.Info("IPAM allocation successful", "ip", allocatedIP)
 			return true, nil
 		}
 
