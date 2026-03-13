@@ -194,14 +194,18 @@ func (s *Service) shouldRetryIfIPConflict(ctx context.Context, err error, nicSpe
 		return false
 	}
 
+	// Check for the specific error pattern indicating IP address conflict first (cheap check)
+	if !mocerrors.IsAlreadySet(err) {
+		return false
+	}
+
 	// When IPAM is the sole allocator (azlocal-overlay), MOC auto-allocation fallback is not
 	// available. The error propagates so the reconciler retries the full IPAM allocation flow.
 	if s.IPAMService != nil && s.IPAMService.IsIPAMSoleAllocator(ctx) {
 		return false
 	}
 
-	// Check for the specific error pattern indicating IP address conflict
-	return mocerrors.IsAlreadySet(err)
+	return true
 }
 
 func (s *Service) handleIPAddressConflictRetry(ctx context.Context, vnicSpec *Spec, networkInterface *network.Interface) (*network.Interface, error) {
