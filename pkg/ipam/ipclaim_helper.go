@@ -275,7 +275,7 @@ func (s *IPAMService) isIPAMAllocationEnabled(ctx context.Context) (bool, error)
 // ("", nil) without error. The optional additionalAnnotations maps are merged into the claim's
 // annotations, allowing callers to attach MOC resource metadata (group, resource name, type).
 // Returns the allocated IP address on success.
-func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP string, additionalAnnotations ...map[string]string) (string, error) {
+func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP string, additionalAnnotations ...map[string]string) (allocatedIP string, err error) {
 	logger := s.logger.WithValues("operation", "AllocateIP", "claimName", claimName)
 
 	enableIPAMAllocation, err := s.isIPAMAllocationEnabled(ctx)
@@ -290,13 +290,22 @@ func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP
 
 	params := s.buildIPClaimParams(claimName, staticIP, AllocationSourceOperatorIPAM, additionalAnnotations...)
 
-	if err := s.createIPClaim(ctx, params); err != nil {
+	// Clean up the IPClaim on any error so the next reconcile starts fresh
+	defer func() {
+		if err != nil {
+			if delErr := s.DeleteIPClaim(ctx, claimName); delErr != nil {
+				logger.Error(delErr, "Failed to delete IPClaim after allocation failure")
+			}
+		}
+	}()
+
+	if err = s.createIPClaim(ctx, params); err != nil {
 		s.telemetryWriter.WriteIPAMOperationLog(logger, OperationCreate, claimName,
 			map[string]string{"requestedIP": staticIP}, err)
 		return "", fmt.Errorf("failed to create IPClaim: %w", err)
 	}
 
-	allocatedIP, err := s.waitForIPAllocation(ctx, claimName)
+	allocatedIP, err = s.waitForIPAllocation(ctx, claimName)
 	if err != nil {
 		s.telemetryWriter.WriteIPAMOperationLog(logger, OperationCreate, claimName,
 			map[string]string{"requestedIP": staticIP}, err)
@@ -420,7 +429,7 @@ func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP st
 		}
 	}
 
-	// Only check with MOC if necessary as the call is expensive
+	// Only check with MOC if necessary 
 	enableIPAMAllocation, enabledErr := s.isIPAMAllocationEnabled(ctx)
 	if enabledErr != nil {
 		return enabledErr
@@ -502,18 +511,18 @@ func (s *IPAMService) GetClusterName() string {
 	return s.clusterName
 }
 
-// ShouldIPAMBeSoleAllocator determines whether the IPAM operator should be the sole IP allocator
+// IsIPAMSoleAllocator determines whether the IPAM operator should be the sole IP allocator
 // (i.e., MOC IPAM fallback is disabled). It checks for the presence of the azstackhci-operator
 // deployment: if absent (azlocal-overlay extension scenario), IPAM is the sole allocator; if
 // present, MOC IPAM fallback is preserved.
-func ShouldIPAMBeSoleAllocator(ctx context.Context, c client.Client) bool {
+func (s *IPAMService) IsIPAMSoleAllocator(ctx context.Context) bool {
 	deployment := &appsv1.Deployment{}
 	key := types.NamespacedName{
 		Name:      azstackhciOperatorDeploymentName,
 		Namespace: azstackhciOperatorDeploymentNamespace,
 	}
 
-	err := c.Get(ctx, key, deployment)
+	err := s.client.Get(ctx, key, deployment)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// azstackhci-operator not deployed → azlocal-overlay extension → IPAM sole allocator
