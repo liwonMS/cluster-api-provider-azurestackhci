@@ -322,7 +322,6 @@ func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP
 }
 
 // DeleteIPClaim deletes an IPAddressClaim by name and waits for the deletion to fully complete.
-// If IPAM allocation is not enabled for the configured VNet, this is a no-op.
 // Returns nil if the claim was successfully deleted or did not exist.
 func (s *IPAMService) DeleteIPClaim(ctx context.Context, claimName string) (err error) {
 	logger := s.logger.WithValues("operation", "DeleteIPClaim", "claimName", claimName)
@@ -422,7 +421,7 @@ func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP st
 		}
 	}
 
-	// Only check with MOC if necessary 
+	// Only check with MOC if necessary
 	enableIPAMAllocation, enabledErr := s.isIPAMAllocationEnabled(ctx)
 	if enabledErr != nil {
 		return enabledErr
