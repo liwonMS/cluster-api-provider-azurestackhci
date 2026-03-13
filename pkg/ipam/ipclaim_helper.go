@@ -77,6 +77,11 @@ const (
 	IPClaimCreatorCAPH    = "caph"
 	IPClaimCreatorCloudOp = "cloud-operator"
 
+	// IPClaimNamespace is the namespace where IPAddressClaims must be created.
+	// This must match the namespace of the Arc VM logical network resource;
+	// otherwise the IPAM operator will reject the claim with a validation error.
+	IPClaimNamespace = "default"
+
 	// IPClaimPollInterval is how often to check IPAddressClaim status
 	IPClaimPollInterval = 100 * time.Millisecond
 
@@ -177,7 +182,7 @@ func NewIPAMService(config IPAMServiceConfig) *IPAMService {
 		logger:          config.Logger,
 		cloudFqdn:       config.CloudFqdn,
 		authorizer:      config.Authorizer,
-		namespace:       "default",
+		namespace:       IPClaimNamespace,
 		vnetName:        config.VnetName,
 		clusterName:     config.ClusterName,
 		creatorID:       config.CreatorID,
