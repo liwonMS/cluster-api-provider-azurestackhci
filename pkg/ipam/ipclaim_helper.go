@@ -17,7 +17,6 @@ package ipam
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -293,23 +292,16 @@ func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP
 
 	params := s.buildIPClaimParams(claimName, staticIP, AllocationSourceOperatorIPAM, additionalAnnotations...)
 
-	// cleanupClaim indicates whether to delete the IPClaim on error.
-	// Set to true after createIPClaim succeeds, but reset to false on timeout
-	// (the claim may still be processing and the next reconcile can pick it up).
-	cleanupClaim := false
+	// Clean up the IPClaim on any error so the next reconcile starts fresh.
 	defer func() {
-		if err != nil && cleanupClaim {
-			// Use a fresh context for cleanup since the original may be cancelled
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), IPClaimTimeout)
-			defer cancel()
-			if delErr := s.deleteIPClaimDirect(cleanupCtx, claimName); delErr != nil {
+		if err != nil {
+			if delErr := s.DeleteIPClaim(context.Background(), claimName); delErr != nil {
 				logger.Error(delErr, "Failed to delete IPClaim after allocation failure")
 			}
 		}
 	}()
 
 	if err = s.createIPClaim(ctx, params); err != nil {
-		cleanupClaim = true // partially created claim may need cleanup
 		s.telemetryWriter.WriteIPAMOperationLog(logger, OperationCreate, claimName,
 			map[string]string{"requestedIP": staticIP}, err)
 		return "", fmt.Errorf("failed to create IPClaim: %w", err)
@@ -317,10 +309,6 @@ func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP
 
 	allocatedIP, err = s.waitForIPAllocation(ctx, claimName)
 	if err != nil {
-		// Only clean up on explicit IPAM operator rejection (Ready=False),
-		// not on timeout — the claim may still be processing and the next
-		// reconcile can pick it up.
-		cleanupClaim = strings.Contains(err.Error(), "IPAM allocation failed")
 		s.telemetryWriter.WriteIPAMOperationLog(logger, OperationCreate, claimName,
 			map[string]string{"requestedIP": staticIP}, err)
 		return "", fmt.Errorf("failed to allocate IP: %w", err)
@@ -339,22 +327,9 @@ func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP
 func (s *IPAMService) DeleteIPClaim(ctx context.Context, claimName string) (err error) {
 	logger := s.logger.WithValues("operation", "DeleteIPClaim", "claimName", claimName)
 
-	enableIPAMAllocation, err := s.isIPAMAllocationEnabled(ctx)
-	if err != nil {
-		return err
-	}
-
-	if !enableIPAMAllocation {
-		logger.Info("IPAM not enabled for VNet, skipping IPAM operation")
-		return nil
-	}
-
 	defer func() {
 		s.telemetryWriter.WriteIPAMOperationLog(logger, OperationDelete, claimName, nil, err)
 	}()
-
-	timeoutCtx, cancel := context.WithTimeout(ctx, IPClaimTimeout)
-	defer cancel()
 
 	claim := &ipamv1.IPAddressClaim{
 		ObjectMeta: metav1.ObjectMeta{
@@ -363,7 +338,11 @@ func (s *IPAMService) DeleteIPClaim(ctx context.Context, claimName string) (err 
 		},
 	}
 
-	if err = s.client.Delete(timeoutCtx, claim); err != nil && !apierrors.IsNotFound(err) {
+	if err = s.client.Delete(ctx, claim); err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Info("IPClaim already deleted", "claimName", claimName)
+			return nil
+		}
 		return fmt.Errorf("failed to delete IPClaim %s: %w", claimName, err)
 	}
 
@@ -398,22 +377,6 @@ func (s *IPAMService) ensureIPClaimDeleted(ctx context.Context, claimName string
 		return fmt.Errorf("failed waiting for IPClaim %s to be deleted: %w", claimName, pollErr)
 	}
 
-	return nil
-}
-
-// deleteIPClaimDirect deletes an IPAddressClaim unconditionally without checking isIPAMAllocationEnabled.
-// This is used for error-path cleanup where the IPAM guard in DeleteIPClaim could prevent cleanup
-// (e.g., when MOC is temporarily unreachable during the cleanup attempt).
-func (s *IPAMService) deleteIPClaimDirect(ctx context.Context, claimName string) error {
-	claim := &ipamv1.IPAddressClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      claimName,
-			Namespace: s.namespace,
-		},
-	}
-	if err := s.client.Delete(ctx, claim); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to delete IPClaim %s: %w", claimName, err)
-	}
 	return nil
 }
 
@@ -638,10 +601,7 @@ func (s *IPAMService) createIPClaim(ctx context.Context, params ipClaimParams) e
 		return fmt.Errorf("failed to set owner reference on IPClaim: %w", err)
 	}
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, IPClaimTimeout)
-	defer cancel()
-
-	if err := s.client.Create(timeoutCtx, claim); err != nil {
+	if err := s.client.Create(ctx, claim); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			logger.Info("IPClaim already exists")
 			return nil
@@ -724,25 +684,4 @@ func (s *IPAMService) waitForIPAllocation(ctx context.Context, claimName string)
 // Standalone Helper Functions
 // =============================================================================
 
-// DeleteIPClaimByName is a standalone helper to delete an IPAddressClaim by name.
-// This can be used during cleanup without needing to create a full IPAMService.
-func DeleteIPClaimByName(ctx context.Context, k8sClient client.Client, claimName, namespace string) error {
-	timeoutCtx, cancel := context.WithTimeout(ctx, IPClaimTimeout)
-	defer cancel()
 
-	claim := &ipamv1.IPAddressClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      claimName,
-			Namespace: namespace,
-		},
-	}
-
-	if err := k8sClient.Delete(timeoutCtx, claim); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return fmt.Errorf("failed to delete IPClaim %s: %w", claimName, err)
-	}
-
-	return nil
-}
