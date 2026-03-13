@@ -20,7 +20,6 @@ const (
 	VipPool          MocResourceType = "VipPool"
 	VirtualNetwork   MocResourceType = "VirtualNetwork"
 	NetworkInterface MocResourceType = "NetworkInterface"
-	IPAddressClaim   MocResourceType = "IPAddressClaim"
 	Disk             MocResourceType = "Disk"
 	VirtualMachine   MocResourceType = "VirtualMachine"
 	KeyVault         MocResourceType = "KeyVault"
