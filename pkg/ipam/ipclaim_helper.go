@@ -64,6 +64,12 @@ const (
 	MocResourceTypeNIC          = "nic"
 	MocResourceTypeLoadBalancer = "load-balancer"
 
+	// Tags used to identify ArcVM-owned virtual networks in MOC.
+	// We check multiple tags for compatibility across different moc-operator versions and gantry.
+	MocOperatorResourceNameTag = "MocOperatorResourceName" // Arc VM moc-operator tag
+	MocOperatorNameTag         = "MocOperatorName"         // Legacy Arc VM moc-operator tag
+	ArcVMOwnedTag              = "ArcVMOwned"              // Overlay-applied tag
+
 	// Allocation source values - indicates whether IP was allocated by IPAM operator or MOC IPAM
 	AllocationSourceOperatorIPAM = "ipam-operator" // IP was allocated directly by IPAM operator
 	AllocationSourceMOCIPAM      = "moc-ipam"      // IP was allocated by MOC IPAM, then synced for tracking
@@ -106,9 +112,11 @@ type IPAMTelemetryWriter interface {
 	WriteIPAMOperationLog(logger logr.Logger, operation IPAMOperation, claimName string, params map[string]string, err error)
 }
 
-// noOpTelemetryWriter is a telemetry writer that does nothing.
+// noOpTelemetryWriter is a default IPAMTelemetryWriter that discards all telemetry.
+// It is used when no custom telemetry writer is provided to IPAMServiceConfig.
 type noOpTelemetryWriter struct{}
 
+// WriteIPAMOperationLog is a no-op implementation that discards all telemetry events.
 func (w *noOpTelemetryWriter) WriteIPAMOperationLog(_ logr.Logger, _ IPAMOperation, _ string, _ map[string]string, _ error) {
 }
 
@@ -155,7 +163,8 @@ type IPAMService struct {
 	owner       client.Object
 }
 
-// NewIPAMService creates a new IPAMService with the given configuration.
+// NewIPAMService creates a new IPAMService from the given configuration.
+// If TelemetryWriter is nil, a no-op writer is used. The namespace defaults to "default".
 func NewIPAMService(config IPAMServiceConfig) *IPAMService {
 	// Use no-op telemetry if not provided
 	telemetryWriter := config.TelemetryWriter
@@ -177,21 +186,51 @@ func NewIPAMService(config IPAMServiceConfig) *IPAMService {
 	}
 }
 
+// arcVMOwnershipTags lists the MOC VNet tags that indicate ArcVM ownership.
+// We check multiple tags for compatibility:
+//   - MocOperatorResourceName: Arc VM moc-operator tag
+//   - MocOperatorName: legacy Arc VM moc-operator tag from older versions
+//   - ArcVMOwned: tag applied by Overlay for ArcVM-owned VNets
+var arcVMOwnershipTags = []string{
+	MocOperatorResourceNameTag,
+	MocOperatorNameTag,
+	ArcVMOwnedTag,
+}
+
+// isArcVMOwnedVNet checks whether a VNet's tags contain any recognized ArcVM ownership tag.
+// Returns true if any of the known ownership tags is present with a non-empty value.
+func isArcVMOwnedVNet(tags map[string]*string) bool {
+	if tags == nil {
+		return false
+	}
+	for _, tag := range arcVMOwnershipTags {
+		if val, ok := tags[tag]; ok && val != nil && *val != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // isIPAMAllocationEnabled determines whether IPAM allocation should proceed for the configured VNet.
-// It returns (true, nil) when the VNet is configured for static IP allocation and IPAM should be used.
-// It returns (false, nil) when IPAM should be skipped (e.g., management VNet, no subnets, non-static allocation).
-// It returns (false, error) when the check cannot be performed due to missing MOC connection configuration
-// or failure to establish a VNet client connection.
+// IPAM allocation is only enabled for ArcVM-owned virtual networks (identified by the MocOperatorResourceName tag)
+// that are configured with static IP allocation on their first subnet.
+// It returns (false, nil) when IPAM should be skipped (e.g., management VNet, not ArcVM-owned,
+// no subnets, or non-static allocation).
+// It returns (false, error) when the check cannot be performed due to missing MOC connection
+// configuration or failure to establish a VNet client connection.
 func (s *IPAMService) isIPAMAllocationEnabled(ctx context.Context) (bool, error) {
+	// Check if this is the management VNet (not eligible for IPAM)
 	if s.vnetName == ManagementVnetName {
 		s.logger.Info("Management VNet detected, skipping IPAM", "vnetName", s.vnetName)
 		return false, nil
 	}
 
+	// Check MOC connection is configured
 	if s.cloudFqdn == "" || s.authorizer == nil {
 		return false, fmt.Errorf("MOC connection not configured: cloudFqdn=%q, authorizerPresent=%v", s.cloudFqdn, s.authorizer != nil)
 	}
 
+	// Check VNet exists in MOC Default_Group (where Arc VM Lnets are created)
 	vnetsClient, err := virtualnetwork.NewVirtualNetworkClient(s.cloudFqdn, s.authorizer)
 	if err != nil {
 		return false, fmt.Errorf("failed to create VNet client: %w", err)
@@ -204,6 +243,14 @@ func (s *IPAMService) isIPAMAllocationEnabled(ctx context.Context) (bool, error)
 	}
 
 	vnet := (*vnets)[0]
+
+	// Check VNet is ArcVM-owned via known ownership tags
+	if !isArcVMOwnedVNet(vnet.Tags) {
+		s.logger.Info("VNet is not ArcVM-owned, skipping IPAM", "vnetName", s.vnetName)
+		return false, nil
+	}
+
+	// Check VNet has subnets
 	if vnet.VirtualNetworkPropertiesFormat == nil ||
 		vnet.VirtualNetworkPropertiesFormat.Subnets == nil ||
 		len(*vnet.VirtualNetworkPropertiesFormat.Subnets) == 0 {
@@ -211,6 +258,7 @@ func (s *IPAMService) isIPAMAllocationEnabled(ctx context.Context) (bool, error)
 		return false, nil
 	}
 
+	// Check subnet uses static IP allocation
 	firstSubnet := (*vnet.VirtualNetworkPropertiesFormat.Subnets)[0]
 	if firstSubnet.IPAllocationMethod != network.Static {
 		s.logger.Info("VNet subnet not configured for Static IP allocation, skipping IPAM",
@@ -222,8 +270,11 @@ func (s *IPAMService) isIPAMAllocationEnabled(ctx context.Context) (bool, error)
 	return true, nil
 }
 
-// AllocateIP allocates an IP address using IPAM.
-// Returns the allocated IP address, or empty string if IPAM is not enabled.
+// AllocateIP creates an IPAddressClaim and waits for the IPAM operator to allocate an IP address.
+// It first checks whether IPAM allocation is enabled for the configured VNet. If not, it returns
+// ("", nil) without error. The optional additionalAnnotations maps are merged into the claim's
+// annotations, allowing callers to attach MOC resource metadata (group, resource name, type).
+// Returns the allocated IP address on success.
 func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP string, additionalAnnotations ...map[string]string) (string, error) {
 	logger := s.logger.WithValues("operation", "AllocateIP", "claimName", claimName)
 
@@ -259,7 +310,9 @@ func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP
 	return allocatedIP, nil
 }
 
-// DeleteIPClaim deletes an IPAddressClaim by name and waits for deletion to complete.
+// DeleteIPClaim deletes an IPAddressClaim by name and waits for the deletion to fully complete.
+// If IPAM allocation is not enabled for the configured VNet, this is a no-op.
+// Returns nil if the claim was successfully deleted or did not exist.
 func (s *IPAMService) DeleteIPClaim(ctx context.Context, claimName string) (err error) {
 	logger := s.logger.WithValues("operation", "DeleteIPClaim", "claimName", claimName)
 
@@ -300,7 +353,8 @@ func (s *IPAMService) DeleteIPClaim(ctx context.Context, claimName string) (err 
 	return nil
 }
 
-// ensureIPClaimDeleted waits for an IPClaim to be fully removed.
+// ensureIPClaimDeleted polls until the specified IPAddressClaim no longer exists in the cluster.
+// It returns an error if the claim is not deleted within IPClaimTimeout.
 func (s *IPAMService) ensureIPClaimDeleted(ctx context.Context, claimName string) error {
 	s.logger.Info("Waiting for IPClaim to be deleted", "claimName", claimName)
 	namespacedName := types.NamespacedName{Name: claimName, Namespace: s.namespace}
@@ -324,8 +378,12 @@ func (s *IPAMService) ensureIPClaimDeleted(ctx context.Context, claimName string
 	return nil
 }
 
-// SyncIPClaim creates/syncs an IPClaim with an externally allocated IP.
-// This is best-effort and non-blocking (doesn't wait for allocation status).
+// SyncIPClaim creates or re-creates an IPAddressClaim to track an IP that was already allocated
+// externally (e.g., by MOC IPAM). This is best-effort and non-blocking — it does not wait for
+// the IPAM operator to reconcile the claim. If an existing claim has a mismatched IP, it is
+// deleted and recreated with the correct IP. The claim is annotated with AllocationSourceMOCIPAM
+// to distinguish it from operator-allocated IPs. The optional additionalAnnotations maps are
+// merged into the claim's annotations.
 func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP string, additionalAnnotations ...map[string]string) error {
 	logger := s.logger.WithValues("operation", "SyncIPClaim", "claimName", claimName, "ip", allocatedIP, "vnetName", s.vnetName)
 
@@ -388,7 +446,9 @@ func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP st
 	return nil
 }
 
-// verifyAllocatedIP checks if the IPAddress in the IPClaim matches the expected IP.
+// verifyAllocatedIP checks whether the IPAddress referenced by an IPAddressClaim matches the
+// expected IP. It fetches the IPAddress object from the cluster and compares its Spec.Address.
+// Returns nil if the IPs match, or an error describing the mismatch.
 func (s *IPAMService) verifyAllocatedIP(ctx context.Context, claim *ipamv1.IPAddressClaim, expectedIP string) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, IPClaimTimeout)
 	defer cancel()
@@ -415,11 +475,14 @@ func (s *IPAMService) verifyAllocatedIP(ctx context.Context, claim *ipamv1.IPAdd
 }
 
 // GenerateNICIPClaimName creates a deterministic IPClaim name for NIC IP allocation.
+// The format is "ipclaim-{nicName}-{index}", where index identifies the IP position on
+// multi-IP NICs.
 func GenerateNICIPClaimName(nicName string, index int) string {
 	return fmt.Sprintf("ipclaim-%s-%d", nicName, index)
 }
 
-// SetOwner updates the owner object for new IP claims.
+// SetOwner updates the owner object used as the OwnerReference on newly created IPAddressClaims.
+// This should be called when the owning resource changes (e.g., switching from cluster to machine).
 func (s *IPAMService) SetOwner(owner client.Object) {
 	s.owner = owner
 }
@@ -439,7 +502,10 @@ func (s *IPAMService) GetClusterName() string {
 	return s.clusterName
 }
 
-// ShouldIPAMBeSoleAllocator determines whether IPAM should be the sole IP allocator
+// ShouldIPAMBeSoleAllocator determines whether the IPAM operator should be the sole IP allocator
+// (i.e., MOC IPAM fallback is disabled). It checks for the presence of the azstackhci-operator
+// deployment: if absent (azlocal-overlay extension scenario), IPAM is the sole allocator; if
+// present, MOC IPAM fallback is preserved.
 func ShouldIPAMBeSoleAllocator(ctx context.Context, c client.Client) bool {
 	deployment := &appsv1.Deployment{}
 	key := types.NamespacedName{
@@ -464,6 +530,8 @@ func ShouldIPAMBeSoleAllocator(ctx context.Context, c client.Client) bool {
 // Internal helpers
 // =============================================================================
 
+// buildIPClaimParams assembles the parameters needed to create an IPAddressClaim, including
+// base annotations (created-by, allocation-source) merged with any additionalAnnotations.
 func (s *IPAMService) buildIPClaimParams(claimName, staticIP, allocationSource string, additionalAnnotations ...map[string]string) ipClaimParams {
 	annotations := map[string]string{
 		AnnotationIPClaimCreatedBy: s.creatorID,
@@ -487,6 +555,7 @@ func (s *IPAMService) buildIPClaimParams(claimName, staticIP, allocationSource s
 	}
 }
 
+// ipClaimParams holds the parameters for creating a single IPAddressClaim resource.
 type ipClaimParams struct {
 	Name        string
 	Namespace   string
@@ -496,6 +565,9 @@ type ipClaimParams struct {
 	Annotations map[string]string
 }
 
+// createIPClaim creates an IPAddressClaim in the cluster from the given params. It sets
+// annotations for VNet/subnet name and static IP (if provided), and attaches an OwnerReference
+// to the service's owner object. If the claim already exists, it returns nil without error.
 func (s *IPAMService) createIPClaim(ctx context.Context, params ipClaimParams) error {
 	logger := s.logger.WithValues("ipClaim", params.Name, "namespace", params.Namespace)
 
@@ -542,6 +614,9 @@ func (s *IPAMService) createIPClaim(ctx context.Context, params ipClaimParams) e
 	return nil
 }
 
+// waitForIPAllocation polls an IPAddressClaim until the IPAM operator populates its
+// Status.AddressRef, then fetches and returns the allocated IP address. It checks for
+// failure conditions (Ready=False) and returns a descriptive error on timeout.
 func (s *IPAMService) waitForIPAllocation(ctx context.Context, claimName string) (string, error) {
 	logger := s.logger.WithValues("ipClaim", claimName)
 	logger.Info("Waiting for IP allocation from IPClaim")
