@@ -19,6 +19,7 @@ package networkinterfaces
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/go-logr/logr"
@@ -39,8 +40,10 @@ type CAPHTelemetryWriter struct {
 func (w *CAPHTelemetryWriter) WriteIPAMOperationLog(logger logr.Logger, operation ipam.IPAMOperation, claimName string, params map[string]string, err error) {
 	var telemetryOp telemetry.Operation
 	switch operation {
-	case ipam.OperationCreate, ipam.OperationSync:
+	case ipam.OperationCreate:
 		telemetryOp = telemetry.Create
+	case ipam.OperationSync:
+		telemetryOp = telemetry.CreateOrUpdate
 	case ipam.OperationDelete:
 		telemetryOp = telemetry.Delete
 	case ipam.OperationGet:
@@ -49,12 +52,13 @@ func (w *CAPHTelemetryWriter) WriteIPAMOperationLog(logger logr.Logger, operatio
 		telemetryOp = telemetry.Create
 	}
 
-	telemetry.WriteMocOperationLog(
+	resource := fmt.Sprintf("IPAddressClaim/%s/%s", ipam.IPClaimNamespace, claimName)
+	telemetry.RecordHybridAKSCRDChange(
 		logger,
-		telemetryOp,
 		w.vmScope.GetCustomResourceTypeWithName(),
-		telemetry.IPAddressClaim,
-		telemetry.GenerateMocResourceName(w.vmScope.GetResourceGroup(), claimName),
+		resource,
+		telemetryOp,
+		telemetry.CRD,
 		params,
 		err,
 	)
@@ -72,16 +76,17 @@ func NewIPAMService(vmscope *scope.VirtualMachineScope) *IPAMService {
 	logger := vmscope.GetLogger()
 
 	config := ipam.IPAMServiceConfig{
-		Client:          vmscope.Client(),
-		Logger:          logger,
-		Namespace:       vmscope.Namespace(),
-		VnetName:        vmscope.VnetName(),
-		CloudFqdn:       vmscope.CloudAgentFqdn,
-		Authorizer:      vmscope.Authorizer,
-		TelemetryWriter: &CAPHTelemetryWriter{vmScope: vmscope},
-		ClusterName:     vmscope.ClusterName(),
-		CreatorID:       ipam.IPClaimCreatorCAPH,
-		Owner:           vmscope.AzureStackHCIVirtualMachine,
+		Client:               vmscope.Client(),
+		Logger:               logger,
+		Namespace:            ipam.IPClaimNamespace,
+		VnetName:             vmscope.VnetName(),
+		CloudFqdn:            vmscope.CloudAgentFqdn,
+		Authorizer:           vmscope.Authorizer,
+		TelemetryWriter:      &CAPHTelemetryWriter{vmScope: vmscope},
+		ClusterName:          vmscope.ClusterName(),
+		CreatorID:            ipam.IPClaimCreatorCAPH,
+		Owner:                vmscope.AzureStackHCIVirtualMachine,
+		ClusterResourceGroup: vmscope.GetResourceGroup(),
 	}
 
 	return &IPAMService{
