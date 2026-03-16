@@ -76,16 +76,17 @@ func NewIPAMService(vmscope *scope.VirtualMachineScope) *IPAMService {
 	logger := vmscope.GetLogger()
 
 	config := ipam.IPAMServiceConfig{
-		Client:          vmscope.Client(),
-		Logger:          logger,
-		Namespace:       ipam.IPClaimNamespace,
-		VnetName:        vmscope.VnetName(),
-		CloudFqdn:       vmscope.CloudAgentFqdn,
-		Authorizer:      vmscope.Authorizer,
-		TelemetryWriter: &CAPHTelemetryWriter{vmScope: vmscope},
-		ClusterName:     vmscope.ClusterName(),
-		CreatorID:       ipam.IPClaimCreatorCAPH,
-		Owner:           vmscope.AzureStackHCIVirtualMachine,
+		Client:               vmscope.Client(),
+		Logger:               logger,
+		Namespace:            ipam.IPClaimNamespace,
+		VnetName:             vmscope.VnetName(),
+		CloudFqdn:            vmscope.CloudAgentFqdn,
+		Authorizer:           vmscope.Authorizer,
+		TelemetryWriter:      &CAPHTelemetryWriter{vmScope: vmscope},
+		ClusterName:          vmscope.ClusterName(),
+		CreatorID:            ipam.IPClaimCreatorCAPH,
+		Owner:                vmscope.AzureStackHCIVirtualMachine,
+		ClusterResourceGroup: vmscope.GetResourceGroup(),
 	}
 
 	return &IPAMService{

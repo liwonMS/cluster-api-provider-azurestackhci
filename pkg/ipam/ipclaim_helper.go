@@ -17,6 +17,7 @@ package ipam
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -45,8 +46,11 @@ const (
 	// ArcVMLnetMocResourceGroup is the MOC resource group for Arc VM logical networks
 	ArcVMLnetMocResourceGroup = "Default_Group"
 
-	// ManagementVnetName is the name of the management VNet (skip IPAM for this)
-	ManagementVnetName = "vnet-arcbridge"
+	// Management resource group names - IPAM should be skipped for these groups
+	// ArcAppliance uses "management" as the management group name
+	ManagementGroupArcAppliance = "management"
+	// 22H2 setup uses "clustergroup" as the management group name
+	ManagementGroup22H2 = "clustergroup"
 
 	// IPClaim annotations
 	AnnotationIPClaimCreatedBy       = AzstackhciAPIGroup + "/created-by"
@@ -146,8 +150,9 @@ type IPAMServiceConfig struct {
 	TelemetryWriter IPAMTelemetryWriter
 
 	// Optional fields for IP claim creation
-	ClusterName string
-	CreatorID   string // e.g., IPClaimCreatorCAPH, IPClaimCreatorCloudOp
+	ClusterName          string
+	CreatorID            string // e.g., IPClaimCreatorCAPH, IPClaimCreatorCloudOp
+	ClusterResourceGroup string // The MOC resource group for the cluster (used to skip IPAM for management groups)
 }
 
 // IPAMService provides high-level IPAM operations with built-in telemetry support.
@@ -161,11 +166,12 @@ type IPAMService struct {
 	cloudFqdn  string
 	authorizer auth.Authorizer
 
-	namespace   string
-	vnetName    string
-	clusterName string
-	creatorID   string
-	owner       client.Object
+	namespace            string
+	vnetName             string
+	clusterName          string
+	creatorID            string
+	clusterResourceGroup string
+	owner                client.Object
 }
 
 // NewIPAMService creates a new IPAMService from the given configuration.
@@ -178,16 +184,17 @@ func NewIPAMService(config IPAMServiceConfig) *IPAMService {
 	}
 
 	return &IPAMService{
-		client:          config.Client,
-		telemetryWriter: telemetryWriter,
-		logger:          config.Logger,
-		cloudFqdn:       config.CloudFqdn,
-		authorizer:      config.Authorizer,
-		namespace:       IPClaimNamespace,
-		vnetName:        config.VnetName,
-		clusterName:     config.ClusterName,
-		creatorID:       config.CreatorID,
-		owner:           config.Owner,
+		client:               config.Client,
+		telemetryWriter:      telemetryWriter,
+		logger:               config.Logger,
+		cloudFqdn:            config.CloudFqdn,
+		authorizer:           config.Authorizer,
+		namespace:            IPClaimNamespace,
+		vnetName:             config.VnetName,
+		clusterName:          config.ClusterName,
+		creatorID:            config.CreatorID,
+		clusterResourceGroup: config.ClusterResourceGroup,
+		owner:                config.Owner,
 	}
 }
 
@@ -216,6 +223,13 @@ func isArcVMOwnedVNet(tags map[string]*string) bool {
 	return false
 }
 
+// isManagementResourceGroup checks whether the given resource group name is a known management group.
+// IPAM should be skipped for VMs in these groups since they are management infrastructure.
+func isManagementResourceGroup(resourceGroup string) bool {
+	return strings.EqualFold(resourceGroup, ManagementGroupArcAppliance) ||
+		strings.EqualFold(resourceGroup, ManagementGroup22H2)
+}
+
 // isIPAMAllocationEnabled determines whether IPAM allocation should proceed for the configured VNet.
 // IPAM allocation is only enabled for ArcVM-owned virtual networks (identified by the MocOperatorResourceName tag)
 // that are configured with static IP allocation on their first subnet.
@@ -224,9 +238,10 @@ func isArcVMOwnedVNet(tags map[string]*string) bool {
 // It returns (false, error) when the check cannot be performed due to missing MOC connection
 // configuration or failure to establish a VNet client connection.
 func (s *IPAMService) isIPAMAllocationEnabled(ctx context.Context) (bool, error) {
-	// Check if this is the management VNet (not eligible for IPAM)
-	if s.vnetName == ManagementVnetName {
-		s.logger.Info("Management VNet detected, skipping IPAM", "vnetName", s.vnetName)
+	// Check if the cluster resource group is a management group (not eligible for IPAM)
+	if isManagementResourceGroup(s.clusterResourceGroup) {
+		s.logger.Info("Management resource group detected, skipping IPAM",
+			"clusterResourceGroup", s.clusterResourceGroup)
 		return false, nil
 	}
 
@@ -394,7 +409,7 @@ func (s *IPAMService) ensureIPClaimDeleted(ctx context.Context, claimName string
 func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP string, additionalAnnotations ...map[string]string) error {
 	logger := s.logger.WithValues("operation", "SyncIPClaim", "claimName", claimName, "ip", allocatedIP, "vnetName", s.vnetName)
 
-	if allocatedIP == "" || s.vnetName == ManagementVnetName {
+	if allocatedIP == "" || isManagementResourceGroup(s.clusterResourceGroup) {
 		return nil
 	}
 
