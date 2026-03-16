@@ -80,6 +80,12 @@ rules:
   - patch
   - update
 - apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+- apiGroups:
   - ipam.cluster.x-k8s.io
   resources:
   - ipaddressclaims
