@@ -85,6 +85,8 @@ rules:
   - deployments
   verbs:
   - get
+  - list
+  - watch
 - apiGroups:
   - ipam.cluster.x-k8s.io
   resources:
