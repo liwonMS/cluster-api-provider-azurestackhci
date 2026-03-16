@@ -75,16 +75,17 @@ func NewIPAMService(clusterScope *scope.ClusterScope, lbScope *scope.LoadBalance
 	logger := clusterScope.GetLogger()
 
 	config := ipam.IPAMServiceConfig{
-		Client:          clusterScope.Client,
-		Logger:          logger,
-		Namespace:       clusterScope.Namespace(),
-		VnetName:        clusterScope.Vnet().Name,
-		CloudFqdn:       clusterScope.GetCloudAgentFqdn(),
-		Authorizer:      clusterScope.GetAuthorizer(),
-		TelemetryWriter: &CAPHTelemetryWriter{clusterScope: clusterScope},
-		ClusterName:     clusterScope.Name(),
-		CreatorID:       ipam.IPClaimCreatorCAPH,
-		Owner:           lbScope.AzureStackHCILoadBalancer,
+		Client:               clusterScope.Client,
+		Logger:               logger,
+		Namespace:            clusterScope.Namespace(),
+		VnetName:             clusterScope.Vnet().Name,
+		CloudFqdn:            clusterScope.GetCloudAgentFqdn(),
+		Authorizer:           clusterScope.GetAuthorizer(),
+		TelemetryWriter:      &CAPHTelemetryWriter{clusterScope: clusterScope},
+		ClusterName:          clusterScope.Name(),
+		CreatorID:            ipam.IPClaimCreatorCAPH,
+		Owner:                lbScope.AzureStackHCILoadBalancer,
+		ClusterResourceGroup: clusterScope.GetResourceGroup(),
 	}
 
 	return &IPAMService{
