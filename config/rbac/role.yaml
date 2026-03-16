@@ -4,106 +4,114 @@ kind: ClusterRole
 metadata:
   name: manager-role
 rules:
-- apiGroups:
-  - ""
-  resources:
-  - events
-  verbs:
-  - create
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - ""
-  resources:
-  - secrets
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - apps
-  resources:
-  - deployments
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - bootstrap.cluster.x-k8s.io
-  - controlplane.cluster.x-k8s.io
-  - infrastructure.cluster.x-k8s.io
-  resources:
-  - '*'
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - cluster.x-k8s.io
-  resources:
-  - clusters
-  - clusters/status
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - cluster.x-k8s.io
-  resources:
-  - machines
-  - machines/status
-  verbs:
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - infrastructure.cluster.x-k8s.io
-  resources:
-  - azurestackhciclusters
-  - azurestackhciloadbalancers
-  - azurestackhcimachines
-  - azurestackhcivirtualmachines
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - infrastructure.cluster.x-k8s.io
-  resources:
-  - azurestackhciclusters/status
-  - azurestackhciloadbalancers/status
-  - azurestackhcimachines/status
-  - azurestackhcivirtualmachines/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - ipam.cluster.x-k8s.io
-  resources:
-  - ipaddressclaims
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - ipam.cluster.x-k8s.io
-  resources:
-  - ipaddresses
-  verbs:
-  - get
-  - list
-  - watch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - bootstrap.cluster.x-k8s.io
+      - controlplane.cluster.x-k8s.io
+      - infrastructure.cluster.x-k8s.io
+    resources:
+      - "*"
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - cluster.x-k8s.io
+    resources:
+      - clusters
+      - clusters/status
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - cluster.x-k8s.io
+    resources:
+      - machines
+      - machines/status
+    verbs:
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - infrastructure.cluster.x-k8s.io
+    resources:
+      - azurestackhciclusters
+      - azurestackhciloadbalancers
+      - azurestackhcimachines
+      - azurestackhcivirtualmachines
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - infrastructure.cluster.x-k8s.io
+    resources:
+      - azurestackhciclusters/status
+      - azurestackhciloadbalancers/status
+      - azurestackhcimachines/status
+      - azurestackhcivirtualmachines/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ipam.cluster.x-k8s.io
+    resources:
+      - ipaddressclaims
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - ipam.cluster.x-k8s.io
+    resources:
+      - ipaddresses
+    verbs:
+      - get
+      - list
+      - watch
