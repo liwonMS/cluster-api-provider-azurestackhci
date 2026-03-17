@@ -19,7 +19,6 @@ package networkinterfaces
 
 import (
 	"context"
-	"time"
 
 	"github.com/Azure/go-autorest/autorest/to"
 	azurestackhci "github.com/microsoft/cluster-api-provider-azurestackhci/cloud"
@@ -27,7 +26,6 @@ import (
 	"github.com/microsoft/moc-sdk-for-go/services/network"
 	mocerrors "github.com/microsoft/moc/pkg/errors"
 	"github.com/pkg/errors"
-	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // Spec specification for ip configuration
@@ -74,7 +72,6 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 	if nic, err := s.Get(ctx, nicSpec); err == nil {
 		// Nic already exists, no update supported for now
 		// Sync back to IPAM to ensure claim exists
-		s.Scope.GetLogger().Info("Nic exists, attempting to sync IPClaim", "name", nicSpec.Name)
 		mocNic := nic.(network.Interface)
 		if s.IPAMService != nil {
 			if err := s.IPAMService.SyncNicIPClaim(ctx, s.Scope.GetResourceGroup(), mocNic); err != nil {
@@ -142,8 +139,12 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 	// assign ipam IP to the moc nic object.
 	if s.IPAMService != nil {
 		if err := s.IPAMService.AllocateNicIPClaim(ctx, s.Scope.GetResourceGroup(), networkInterface, nicSpec.StaticIPAddress); err != nil {
+			if s.IPAMService.IsIPAMSoleAllocator(ctx) {
+				// IPAM is the sole allocator (azlocal-overlay): propagate error, do not fall back to MOC
+				return errors.Wrapf(err, "IPAM sole allocator: failed to allocate IP for network interface %s", nicSpec.Name)
+			}
 			logger.Error(err, "Failed to allocate IPClaim for network interface", "name", nicSpec.Name)
-			// Best-effort - continue with NIC creation
+			// Best-effort - continue with NIC creation (MOC will allocate)
 		}
 	}
 
@@ -156,7 +157,7 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 	telemetry.WriteMocOperationLog(s.Scope.GetLogger(), telemetry.CreateOrUpdate, s.Scope.GetCustomResourceTypeWithName(), telemetry.NetworkInterface,
 		telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), nicSpec.Name), &networkInterface, err)
 	if err != nil {
-		if s.shouldRetryIfIPConflict(err, nicSpec) {
+		if s.shouldRetryIfIPConflict(ctx, err, nicSpec) {
 			if createdNic, err = s.handleIPAddressConflictRetry(ctx, nicSpec, &networkInterface); err != nil {
 				return errors.Wrapf(err, "failed to retry create with network interface %s in resource group %s", nicSpec.Name, s.Scope.GetResourceGroup())
 			}
@@ -176,15 +177,34 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 	return nil
 }
 
-// isIPConflictError checks if the error indicates an IP address conflict that should trigger a retry
-func (s *Service) shouldRetryIfIPConflict(err error, nicSpec *Spec) bool {
-	// user specified static IP, no need to retry
+// shouldRetryIfIPConflict determines whether a NIC creation failure due to an IP address conflict
+// should trigger a retry with MOC auto-allocation. This handles an edge case where a race condition
+// between IPAM state and MOC state causes the IPAM-assigned IP to already be in use in MOC. The retry path clears the IPAM IP and
+// recreates the NIC with an empty PrivateIPAddress, letting MOC auto-allocate a non-conflicting IP.
+//
+// Returns false (no retry) when:
+//   - There is no error, or the user specified a static IP (not managed by IPAM).
+//   - IPAM is the sole allocator (azlocal-overlay scenario): MOC fallback is not available, so
+//     retrying with MOC auto-allocation is not an option. The error propagates and the reconciler
+//     will retry the full IPAM allocation flow. IPClaims are cleaned up on cluster deletion.
+//   - The error is not an IP conflict (AlreadySet) error.
+func (s *Service) shouldRetryIfIPConflict(ctx context.Context, err error, nicSpec *Spec) bool {
 	if err == nil || nicSpec.StaticIPAddress != "" {
 		return false
 	}
 
-	// Check for the specific error pattern indicating IP address conflict
-	return mocerrors.IsAlreadySet(err)
+	// Check for the specific error pattern indicating IP address conflict first (cheap check)
+	if !mocerrors.IsAlreadySet(err) {
+		return false
+	}
+
+	// When IPAM is the sole allocator (azlocal-overlay), MOC auto-allocation fallback is not
+	// available. The error propagates so the reconciler retries the full IPAM allocation flow.
+	if s.IPAMService != nil && s.IPAMService.IsIPAMSoleAllocator(ctx) {
+		return false
+	}
+
+	return true
 }
 
 func (s *Service) handleIPAddressConflictRetry(ctx context.Context, vnicSpec *Spec, networkInterface *network.Interface) (*network.Interface, error) {
@@ -198,14 +218,7 @@ func (s *Service) handleIPAddressConflictRetry(ctx context.Context, vnicSpec *Sp
 	}
 	logger.Info("IP allocated by IPAM is already taken in Moc, retrying", "Conflicted IP", conflictedIP)
 
-	// Clean up the failed IPClaim with the conflicting IP
-	if s.IPAMService != nil {
-		if err := s.IPAMService.DeleteNicIPClaim(ctx, vnicSpec); err != nil {
-			logger.Error(err, "Failed to delete IPClaim after IP conflict")
-		}
-	}
-
-	// Remove the failed mocnetworkinterface
+	// Remove the failed mocnetworkinterface (this also cleans up the IPClaim via defer in Delete)
 	if err := s.Delete(ctx, vnicSpec); err != nil && !azurestackhci.ResourceNotFound(err) {
 		return nil, err
 	}
@@ -249,43 +262,10 @@ func (s *Service) Delete(ctx context.Context, spec interface{}) error {
 	err := s.Client.Delete(ctx, s.Scope.GetResourceGroup(), nicSpec.Name)
 	telemetry.WriteMocOperationLog(logger, telemetry.Delete, s.Scope.GetCustomResourceTypeWithName(), telemetry.NetworkInterface,
 		telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), nicSpec.Name), nil, err)
-	if err != nil && azurestackhci.ResourceNotFound(err) {
-		return nil
-	}
 	if err != nil {
 		return errors.Wrapf(err, "failed to delete network interface %s in resource group %s", nicSpec.Name, s.Scope.GetResourceGroup())
 	}
 
-	err = s.ensureNicDeleted(ctx, nicSpec)
-	if err != nil {
-		return errors.Wrapf(err, "timed out waiting for deletion of network interface %s in resource group %s", nicSpec.Name, s.Scope.GetResourceGroup())
-	}
-
 	logger.Info("successfully deleted nic", "name", nicSpec.Name)
 	return err
-}
-
-// ensureNicDeleted ensures the network interface is deleted by polling Get with a 5 second timeout.
-func (s *Service) ensureNicDeleted(ctx context.Context, nicSpec *Spec) error {
-	logger := s.Scope.GetLogger()
-
-	pollErr := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
-		_, err := s.Get(ctx, nicSpec)
-		if err != nil {
-			if azurestackhci.ResourceNotFound(err) {
-				logger.Info("nic is deleted", "name", nicSpec.Name)
-				return true, nil // Deletion complete
-			}
-			logger.Error(err, "failed to get nic", "name", nicSpec.Name)
-			return false, err
-		}
-		logger.Info("nic still exists, waiting for deletion", "name", nicSpec.Name)
-		return false, nil // Continue polling
-	})
-
-	if pollErr != nil {
-		return errors.Wrapf(pollErr, "failed waiting for nic %s to be deleted", nicSpec.Name)
-	}
-
-	return nil
 }
