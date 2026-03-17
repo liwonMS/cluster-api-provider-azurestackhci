@@ -116,7 +116,9 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 	return nil
 }
 
-// syncLoadBalancerIPToIPAM syncs the MOC-allocated LB IP to IPAM.
+// syncLoadBalancerIPToIPAM syncs the MOC-allocated LB IP to IPAM via SyncIPClaim only.
+// We intentionally do not actively allocate IPs in the LB create/reconcile path because
+// the CAPH LB path is deprecated (cloud-operator manages LBs via AksHciCluster).
 // This is best-effort and non-blocking.
 func (s *Service) syncLoadBalancerIPToIPAM(ctx context.Context, lb network.LoadBalancer) {
 	if s.IPAMService == nil {
