@@ -544,15 +544,15 @@ func (s *IPAMService) IsIPAMSoleAllocator(ctx context.Context) bool {
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// azstackhci-operator not deployed → azlocal-overlay extension → IPAM sole allocator
-			s.logger.Info("azstackhci-operator deployment not found")
+			s.logger.Info(fmt.Sprintf("deployment not found: %s", azstackhciOperatorDeploymentName))
 			return true
 		}
 		// API error → assume 2607 → keep MOC fallback
-		s.logger.Info("Error checking for azstackhci-operator deployment", "error", err.Error())
+		s.logger.Info(fmt.Sprintf("Error checking for deployment: %s", azstackhciOperatorDeploymentName), "error", err.Error())
 		return false
 	}
 	// azstackhci-operator deployed → 2607 → keep MOC fallback
-	s.logger.Info("azstackhci-operator deployment found")
+	s.logger.Info(fmt.Sprintf("deployment found: %s", azstackhciOperatorDeploymentName))
 	return false
 }
 
