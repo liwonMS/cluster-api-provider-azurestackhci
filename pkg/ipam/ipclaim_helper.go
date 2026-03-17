@@ -52,11 +52,11 @@ const (
 	ManagementGroup22H2 = "clustergroup"
 
 	// IPClaim annotations
-	AnnotationIPClaimCreatedBy       = AzstackhciAPIGroup + "/created-by"
+	AnnotationIPClaimCreatedBy   = AzstackhciAPIGroup + "/created-by"
 	AnnotationIPClaimStaticIP    = "ipam." + AzstackhciAPIGroup + "/requested-ip"
 	AnnotationLogicalNetworkName = "ipam." + AzstackhciAPIGroup + "/logicalNetworkName"
-	AnnotationSubnetName             = "ipam." + AzstackhciAPIGroup + "/subnetName"
-	AnnotationAllocationSource       = "ipam." + AzstackhciAPIGroup + "/allocation-source"
+	AnnotationSubnetName         = "ipam." + AzstackhciAPIGroup + "/subnetName"
+	AnnotationAllocationSource   = "ipam." + AzstackhciAPIGroup + "/allocation-source"
 
 	// MOC resource annotations for tracking the underlying MOC resource associated with an IPClaim
 	AnnotationMocGroupName    = AzstackhciAPIGroup + "/moc-group-name"
@@ -538,12 +538,15 @@ func (s *IPAMService) IsIPAMSoleAllocator(ctx context.Context) bool {
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// azstackhci-operator not deployed → azlocal-overlay extension → IPAM sole allocator
+			s.logger.Info(fmt.Sprintf("deployment not found: %s", azstackhciOperatorDeploymentName))
 			return true
 		}
 		// API error → assume 2607 → keep MOC fallback
+		s.logger.Info(fmt.Sprintf("Error checking for deployment: %s", azstackhciOperatorDeploymentName), "error", err.Error())
 		return false
 	}
 	// azstackhci-operator deployed → 2607 → keep MOC fallback
+	s.logger.Info(fmt.Sprintf("deployment found: %s", azstackhciOperatorDeploymentName))
 	return false
 }
 
@@ -697,5 +700,3 @@ func (s *IPAMService) waitForIPAllocation(ctx context.Context, claimName string)
 
 	return allocatedIP, nil
 }
-
-
