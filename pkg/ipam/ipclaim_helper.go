@@ -409,12 +409,7 @@ func (s *IPAMService) ensureIPClaimDeleted(ctx context.Context, claimName string
 func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP string, additionalAnnotations ...map[string]string) error {
 	logger := s.logger.WithValues("operation", "SyncIPClaim", "claimName", claimName, "ip", allocatedIP, "vnetName", s.vnetName)
 
-	if allocatedIP == "" {
-		logger.Info("Skipping SyncIPClaim, allocated IP is empty")
-		return nil
-	}
-	if isManagementResourceGroup(s.clusterResourceGroup) {
-		logger.Info("Skipping SyncIPClaim for management resource group", "clusterResourceGroup", s.clusterResourceGroup)
+	if allocatedIP == "" || isManagementResourceGroup(s.clusterResourceGroup) {
 		return nil
 	}
 
