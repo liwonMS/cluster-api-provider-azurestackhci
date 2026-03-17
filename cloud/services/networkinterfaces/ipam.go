@@ -68,8 +68,19 @@ type IPAMService struct {
 }
 
 // NewIPAMService creates a new IPAM service instance.
-func NewIPAMService(vmscope *scope.VirtualMachineScope) *IPAMService {
-	logger := vmscope.GetLogger()
+// Returns nil if IPAM is not supported on this environment (e.g., 22H2).
+func NewIPAMService(ctx context.Context, vmscope *scope.VirtualMachineScope) *IPAMService {
+	logger := vmscope.GetLogger().WithName("NIC-IPAMService")
+
+	logger.Info("Initializing NIC IPAM service",
+		"cluster", vmscope.ClusterName(),
+		"namespace", vmscope.Namespace(),
+		"vnet", vmscope.VnetName())
+
+	if !ipam.IsIPAMSupported(ctx, vmscope.Client()) {
+		logger.Info("IPAM not supported on this environment, skipping NIC IPAM service initialization")
+		return nil
+	}
 
 	config := ipam.IPAMServiceConfig{
 		Client:          vmscope.Client(),
@@ -84,6 +95,7 @@ func NewIPAMService(vmscope *scope.VirtualMachineScope) *IPAMService {
 		Owner:           vmscope.AzureStackHCIVirtualMachine,
 	}
 
+	logger.Info("NIC IPAM service initialized successfully")
 	return &IPAMService{
 		IPAMService: ipam.NewIPAMService(config),
 	}

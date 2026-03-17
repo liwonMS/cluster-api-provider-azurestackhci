@@ -18,6 +18,7 @@ limitations under the License.
 package controllers
 
 import (
+	"context"
 	"encoding/base64"
 	"time"
 
@@ -50,10 +51,10 @@ type azureStackHCIVirtualMachineService struct {
 }
 
 // newAzureStackHCIMachineService populates all the services based on input scope
-func newAzureStackHCIVirtualMachineService(vmScope *scope.VirtualMachineScope) *azureStackHCIVirtualMachineService {
+func newAzureStackHCIVirtualMachineService(ctx context.Context, vmScope *scope.VirtualMachineScope) *azureStackHCIVirtualMachineService {
 	return &azureStackHCIVirtualMachineService{
 		vmScope:              vmScope,
-		networkInterfacesSvc: networkinterfaces.NewService(vmScope, networkinterfaces.NewIPAMService(vmScope)),
+		networkInterfacesSvc: networkinterfaces.NewService(vmScope, networkinterfaces.NewIPAMService(ctx, vmScope)),
 		virtualMachinesSvc:   virtualmachines.NewService(vmScope),
 		disksSvc:             disks.NewService(vmScope),
 	}

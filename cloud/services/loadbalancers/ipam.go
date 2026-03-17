@@ -68,8 +68,19 @@ type IPAMService struct {
 }
 
 // NewIPAMService creates a new IPAM service instance for CAPH LoadBalancer.
-func NewIPAMService(clusterScope *scope.ClusterScope, lbScope *scope.LoadBalancerScope) *IPAMService {
-	logger := clusterScope.GetLogger()
+// Returns nil if IPAM is not supported on this environment (e.g., 22H2).
+func NewIPAMService(ctx context.Context, clusterScope *scope.ClusterScope, lbScope *scope.LoadBalancerScope) *IPAMService {
+	logger := clusterScope.GetLogger().WithName("LB-IPAMService")
+
+	logger.Info("Initializing LB IPAM service",
+		"cluster", clusterScope.Name(),
+		"namespace", clusterScope.Namespace(),
+		"vnet", clusterScope.Vnet().Name)
+
+	if !ipam.IsIPAMSupported(ctx, clusterScope.Client) {
+		logger.Info("IPAM not supported on this environment, skipping LB IPAM service initialization")
+		return nil
+	}
 
 	config := ipam.IPAMServiceConfig{
 		Client:          clusterScope.Client,
@@ -84,6 +95,7 @@ func NewIPAMService(clusterScope *scope.ClusterScope, lbScope *scope.LoadBalance
 		Owner:           lbScope.AzureStackHCILoadBalancer,
 	}
 
+	logger.Info("LB IPAM service initialized successfully")
 	return &IPAMService{
 		IPAMService: ipam.NewIPAMService(config),
 		clusterName: clusterScope.Name(),
