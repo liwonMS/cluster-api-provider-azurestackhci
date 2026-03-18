@@ -40,8 +40,10 @@ type CAPHTelemetryWriter struct {
 func (w *CAPHTelemetryWriter) WriteIPAMOperationLog(logger logr.Logger, operation ipam.IPAMOperation, claimName string, params map[string]string, err error) {
 	var telemetryOp telemetry.Operation
 	switch operation {
-	case ipam.OperationCreate, ipam.OperationSync:
+	case ipam.OperationCreate:
 		telemetryOp = telemetry.Create
+	case ipam.OperationSync:
+		telemetryOp = telemetry.CreateOrUpdate
 	case ipam.OperationDelete:
 		telemetryOp = telemetry.Delete
 	case ipam.OperationGet:
@@ -50,12 +52,13 @@ func (w *CAPHTelemetryWriter) WriteIPAMOperationLog(logger logr.Logger, operatio
 		telemetryOp = telemetry.Create
 	}
 
-	telemetry.WriteMocOperationLog(
+	resource := fmt.Sprintf("IPAddressClaim/%s/%s", ipam.IPClaimNamespace, claimName)
+	telemetry.RecordHybridAKSCRDChange(
 		logger,
-		telemetryOp,
 		w.clusterScope.GetCustomResourceTypeWithName(),
-		telemetry.IPAddressClaim,
-		telemetry.GenerateMocResourceName(w.clusterScope.GetResourceGroup(), claimName),
+		resource,
+		telemetryOp,
+		telemetry.CRD,
 		params,
 		err,
 	)
@@ -83,16 +86,17 @@ func NewIPAMService(clusterScope *scope.ClusterScope, lbScope *scope.LoadBalance
 	}
 
 	config := ipam.IPAMServiceConfig{
-		Client:          clusterScope.Client,
-		Logger:          logger,
-		Namespace:       clusterScope.Namespace(),
-		VnetName:        clusterScope.Vnet().Name,
-		CloudFqdn:       clusterScope.GetCloudAgentFqdn(),
-		Authorizer:      clusterScope.GetAuthorizer(),
-		TelemetryWriter: &CAPHTelemetryWriter{clusterScope: clusterScope},
-		ClusterName:     clusterScope.Name(),
-		CreatorID:       ipam.IPClaimCreatorCAPH,
-		Owner:           lbScope.AzureStackHCILoadBalancer,
+		Client:               clusterScope.Client,
+		Logger:               logger,
+		Namespace:            clusterScope.Namespace(),
+		VnetName:             clusterScope.Vnet().Name,
+		CloudFqdn:            clusterScope.GetCloudAgentFqdn(),
+		Authorizer:           clusterScope.GetAuthorizer(),
+		TelemetryWriter:      &CAPHTelemetryWriter{clusterScope: clusterScope},
+		ClusterName:          clusterScope.Name(),
+		CreatorID:            ipam.IPClaimCreatorCAPH,
+		Owner:                lbScope.AzureStackHCILoadBalancer,
+		ClusterResourceGroup: clusterScope.GetResourceGroup(),
 	}
 
 	logger.Info("LB IPAM service initialized successfully")
