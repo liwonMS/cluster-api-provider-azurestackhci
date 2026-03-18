@@ -73,9 +73,11 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 		// Nic already exists, no update supported for now
 		// Sync back to IPAM to ensure claim exists
 		mocNic := nic.(network.Interface)
-		if err := s.IPAMService.SyncNicIPClaim(ctx, s.Scope.GetResourceGroup(), mocNic); err != nil {
-			s.Scope.GetLogger().Info("Failed to sync IPClaim during reconcile", "error", err)
-			// Non-blocking - don't fail NIC reconcile
+		if s.IPAMService != nil {
+			if err := s.IPAMService.SyncNicIPClaim(ctx, s.Scope.GetResourceGroup(), mocNic); err != nil {
+				s.Scope.GetLogger().Info("Failed to sync IPClaim during reconcile", "error", err)
+				// Non-blocking - don't fail NIC reconcile
+			}
 		}
 		return nil
 	}
