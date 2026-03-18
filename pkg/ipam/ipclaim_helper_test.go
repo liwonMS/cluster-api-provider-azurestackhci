@@ -326,9 +326,9 @@ var _ = Describe("buildIPClaimParams", func() {
 	})
 
 	It("sets base annotations with creator and allocation source", func() {
-		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceOperatorIPAM)
+		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceIPAM)
 		Expect(params.Annotations).To(HaveKeyWithValue(AnnotationIPClaimCreatedBy, IPClaimCreatorCAPH))
-		Expect(params.Annotations).To(HaveKeyWithValue(AnnotationAllocationSource, AllocationSourceOperatorIPAM))
+		Expect(params.Annotations).To(HaveKeyWithValue(AnnotationAllocationSource, AllocationSourceIPAM))
 	})
 
 	It("skips allocation source annotation when empty", func() {
@@ -342,7 +342,7 @@ var _ = Describe("buildIPClaimParams", func() {
 			AnnotationMocResourceName: "my-nic",
 			AnnotationMocResourceType: MocResourceTypeNIC,
 		}
-		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceMOCIPAM, extra)
+		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceMOC, extra)
 		Expect(params.Annotations).To(HaveKeyWithValue(AnnotationMocGroupName, "my-group"))
 		Expect(params.Annotations).To(HaveKeyWithValue(AnnotationMocResourceName, "my-nic"))
 		Expect(params.Annotations).To(HaveKeyWithValue(AnnotationMocResourceType, MocResourceTypeNIC))
@@ -353,7 +353,7 @@ var _ = Describe("buildIPClaimParams", func() {
 	It("merges multiple additional annotation maps", func() {
 		extra1 := map[string]string{"key1": "val1"}
 		extra2 := map[string]string{"key2": "val2"}
-		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceOperatorIPAM, extra1, extra2)
+		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceIPAM, extra1, extra2)
 		Expect(params.Annotations).To(HaveKeyWithValue("key1", "val1"))
 		Expect(params.Annotations).To(HaveKeyWithValue("key2", "val2"))
 	})
@@ -361,12 +361,12 @@ var _ = Describe("buildIPClaimParams", func() {
 	It("later annotation maps override earlier ones", func() {
 		extra1 := map[string]string{"key": "first"}
 		extra2 := map[string]string{"key": "second"}
-		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceOperatorIPAM, extra1, extra2)
+		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceIPAM, extra1, extra2)
 		Expect(params.Annotations).To(HaveKeyWithValue("key", "second"))
 	})
 
 	It("sets core fields correctly", func() {
-		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceOperatorIPAM)
+		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceIPAM)
 		Expect(params.Name).To(Equal("claim-1"))
 		Expect(params.Namespace).To(Equal(IPClaimNamespace))
 		Expect(params.ClusterName).To(Equal("test-cluster"))
@@ -384,7 +384,7 @@ var _ = Describe("createIPClaim", func() {
 		fakeClient := newFakeClient()
 		svc := newTestIPAMService(fakeClient)
 
-		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceOperatorIPAM)
+		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceIPAM)
 		err := svc.createIPClaim(context.Background(), params)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -396,14 +396,14 @@ var _ = Describe("createIPClaim", func() {
 		Expect(claim.Annotations).To(HaveKeyWithValue(AnnotationLogicalNetworkName, "test-vnet"))
 		Expect(claim.Annotations).To(HaveKeyWithValue(AnnotationSubnetName, "test-vnet"))
 		Expect(claim.Annotations).To(HaveKeyWithValue(AnnotationIPClaimCreatedBy, IPClaimCreatorCAPH))
-		Expect(claim.Annotations).To(HaveKeyWithValue(AnnotationAllocationSource, AllocationSourceOperatorIPAM))
+		Expect(claim.Annotations).To(HaveKeyWithValue(AnnotationAllocationSource, AllocationSourceIPAM))
 	})
 
 	It("sets ClusterName in spec", func() {
 		fakeClient := newFakeClient()
 		svc := newTestIPAMService(fakeClient)
 
-		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceOperatorIPAM)
+		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceIPAM)
 		err := svc.createIPClaim(context.Background(), params)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -417,7 +417,7 @@ var _ = Describe("createIPClaim", func() {
 		fakeClient := newFakeClient()
 		svc := newTestIPAMService(fakeClient)
 
-		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceOperatorIPAM)
+		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceIPAM)
 		err := svc.createIPClaim(context.Background(), params)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -431,7 +431,7 @@ var _ = Describe("createIPClaim", func() {
 		fakeClient := newFakeClient()
 		svc := newTestIPAMService(fakeClient)
 
-		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceOperatorIPAM)
+		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceIPAM)
 		err := svc.createIPClaim(context.Background(), params)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -452,7 +452,7 @@ var _ = Describe("createIPClaim", func() {
 		fakeClient := newFakeClient(existingClaim)
 		svc := newTestIPAMService(fakeClient)
 
-		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceOperatorIPAM)
+		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceIPAM)
 		err := svc.createIPClaim(context.Background(), params)
 		Expect(err).NotTo(HaveOccurred())
 	})

@@ -57,7 +57,7 @@ const (
 	AnnotationIPClaimStaticIP    = "ipam." + AzstackhciAPIGroup + "/requested-ip"
 	AnnotationLogicalNetworkName = "ipam." + AzstackhciAPIGroup + "/logicalNetworkName"
 	AnnotationSubnetName         = "ipam." + AzstackhciAPIGroup + "/subnetName"
-	AnnotationAllocationSource   = "ipam." + AzstackhciAPIGroup + "/allocation-source"
+	AnnotationAllocationSource   = AzstackhciAPIGroup + "/allocation-source"
 
 	// MOC resource annotations for tracking the underlying MOC resource associated with an IPClaim
 	AnnotationMocGroupName    = AzstackhciAPIGroup + "/moc-group-name"
@@ -75,8 +75,8 @@ const (
 	ArcVMOwnedTag              = "ArcVMOwned"              // Overlay-applied tag
 
 	// Allocation source values - indicates whether IP was allocated by IPAM operator or MOC IPAM
-	AllocationSourceOperatorIPAM = "ipam-operator" // IP was allocated directly by IPAM operator
-	AllocationSourceMOCIPAM      = "moc-ipam"      // IP was allocated by MOC IPAM, then synced for tracking
+	AllocationSourceIPAM = "ipam" // IP was allocated by IPAM before NIC creation
+	AllocationSourceMOC  = "moc"  // IP was assigned by MOC, then synced for tracking
 
 	// Creator identifiers for tracking which component created the claim
 	IPClaimCreatorCAPH    = "caph"
@@ -320,7 +320,7 @@ func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP
 		return "", nil
 	}
 
-	params := s.buildIPClaimParams(claimName, staticIP, AllocationSourceOperatorIPAM, additionalAnnotations...)
+	params := s.buildIPClaimParams(claimName, staticIP, AllocationSourceIPAM, additionalAnnotations...)
 
 	// Clean up the IPClaim on any error so the next reconcile starts fresh.
 	defer func() {
@@ -412,7 +412,7 @@ func (s *IPAMService) ensureIPClaimDeleted(ctx context.Context, claimName string
 // SyncIPClaim creates or re-creates an IPAddressClaim to track an IP that was already allocated
 // externally (e.g., by MOC IPAM). This is best-effort and non-blocking — it does not wait for
 // the IPAM operator to reconcile the claim. If an existing claim has a mismatched IP, it is
-// deleted and recreated with the correct IP. The claim is annotated with AllocationSourceMOCIPAM
+// deleted and recreated with the correct IP. The claim is annotated with AllocationSourceMOC
 // to distinguish it from operator-allocated IPs. The optional additionalAnnotations maps are
 // merged into the claim's annotations.
 func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP string, additionalAnnotations ...map[string]string) error {
@@ -463,8 +463,8 @@ func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP st
 
 	// Just create, not waiting for completion
 	// Note: If an IPClaim already existed with a mismatched IP, it was deleted above and
-	// recreated here with AllocationSourceMOCIPAM, correctly reflecting that the final IP came from MOC.
-	params := s.buildIPClaimParams(claimName, allocatedIP, AllocationSourceMOCIPAM, additionalAnnotations...)
+	// recreated here with AllocationSourceMOC, correctly reflecting that the final IP came from MOC.
+	params := s.buildIPClaimParams(claimName, allocatedIP, AllocationSourceMOC, additionalAnnotations...)
 	if err := s.createIPClaim(ctx, params); err != nil {
 		s.telemetryWriter.WriteIPAMOperationLog(logger, OperationSync, claimName,
 			map[string]string{"allocatedIP": allocatedIP, "vnetName": s.vnetName}, err)
