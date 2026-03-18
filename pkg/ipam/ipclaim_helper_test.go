@@ -24,7 +24,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	ipamv1 "sigs.k8s.io/cluster-api/api/ipam/v1beta2"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	ipamv1 "sigs.k8s.io/cluster-api/exp/ipam/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -535,7 +536,7 @@ var _ = Describe("verifyAllocatedIP", func() {
 				Namespace: IPClaimNamespace,
 			},
 			Status: ipamv1.IPAddressClaimStatus{
-				AddressRef: ipamv1.IPAddressReference{Name: "ipaddr-1"},
+				AddressRef: corev1.LocalObjectReference{Name: "ipaddr-1"},
 			},
 		}
 
@@ -562,7 +563,7 @@ var _ = Describe("verifyAllocatedIP", func() {
 				Namespace: IPClaimNamespace,
 			},
 			Status: ipamv1.IPAddressClaimStatus{
-				AddressRef: ipamv1.IPAddressReference{Name: "ipaddr-1"},
+				AddressRef: corev1.LocalObjectReference{Name: "ipaddr-1"},
 			},
 		}
 
@@ -599,7 +600,7 @@ var _ = Describe("verifyAllocatedIP", func() {
 				Namespace: IPClaimNamespace,
 			},
 			Status: ipamv1.IPAddressClaimStatus{
-				AddressRef: ipamv1.IPAddressReference{Name: "nonexistent"},
+				AddressRef: corev1.LocalObjectReference{Name: "nonexistent"},
 			},
 		}
 
@@ -672,7 +673,7 @@ var _ = Describe("waitForIPAllocation", func() {
 				Namespace: IPClaimNamespace,
 			},
 			Status: ipamv1.IPAddressClaimStatus{
-				AddressRef: ipamv1.IPAddressReference{Name: "ipaddr-1"},
+				AddressRef: corev1.LocalObjectReference{Name: "ipaddr-1"},
 			},
 		}
 		fakeClient := newFakeClient(claim, ipAddr)
@@ -690,10 +691,10 @@ var _ = Describe("waitForIPAllocation", func() {
 				Namespace: IPClaimNamespace,
 			},
 			Status: ipamv1.IPAddressClaimStatus{
-				Conditions: []metav1.Condition{
+				Conditions: clusterv1.Conditions{
 					{
-						Type:    ReadyConditionType,
-						Status:  metav1.ConditionFalse,
+						Type:    clusterv1.ConditionType(ReadyConditionType),
+						Status:  corev1.ConditionFalse,
 						Message: "IP pool exhausted",
 					},
 				},
@@ -819,7 +820,7 @@ var _ = Describe("SyncIPClaim", func() {
 				Namespace: IPClaimNamespace,
 			},
 			Status: ipamv1.IPAddressClaimStatus{
-				AddressRef: ipamv1.IPAddressReference{Name: "ipaddr-1"},
+				AddressRef: corev1.LocalObjectReference{Name: "ipaddr-1"},
 			},
 		}
 		fakeClient := newFakeClient(existingClaim, ipAddr)
@@ -852,7 +853,7 @@ var _ = Describe("SyncIPClaim", func() {
 				Namespace: IPClaimNamespace,
 			},
 			Status: ipamv1.IPAddressClaimStatus{
-				AddressRef: ipamv1.IPAddressReference{Name: "ipaddr-1"},
+				AddressRef: corev1.LocalObjectReference{Name: "ipaddr-1"},
 			},
 		}
 		fakeClient := newFakeClient(existingClaim, ipAddr)
@@ -923,7 +924,7 @@ var _ = Describe("SyncIPClaim", func() {
 				Namespace: IPClaimNamespace,
 			},
 			Status: ipamv1.IPAddressClaimStatus{
-				AddressRef: ipamv1.IPAddressReference{Name: "missing-ipaddr"},
+				AddressRef: corev1.LocalObjectReference{Name: "missing-ipaddr"},
 			},
 		}
 		telemetry := &mockTelemetryWriter{}
