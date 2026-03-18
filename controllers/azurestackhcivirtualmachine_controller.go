@@ -120,11 +120,11 @@ func (r *AzureStackHCIVirtualMachineReconciler) Reconcile(ctx context.Context, r
 
 	// Handle deleted machines
 	if !azureStackHCIVirtualMachine.ObjectMeta.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, virtualMachineScope)
+		return r.reconcileDelete(virtualMachineScope)
 	}
 
 	// Handle non-deleted machines
-	return r.reconcileNormal(ctx, virtualMachineScope)
+	return r.reconcileNormal(virtualMachineScope)
 }
 
 // findVM queries the AzureStackHCI APIs and retrieves the VM if it exists, returns nil otherwise.
@@ -139,7 +139,7 @@ func (r *AzureStackHCIVirtualMachineReconciler) findVM(scope *scope.VirtualMachi
 	return vm, nil
 }
 
-func (r *AzureStackHCIVirtualMachineReconciler) reconcileNormal(ctx context.Context, virtualMachineScope *scope.VirtualMachineScope) (reconcile.Result, error) {
+func (r *AzureStackHCIVirtualMachineReconciler) reconcileNormal(virtualMachineScope *scope.VirtualMachineScope) (reconcile.Result, error) {
 	virtualMachineScope.Info("Reconciling AzureStackHCIVirtualMachine")
 	// If the AzureStackHCIVirtualMachine is in an error state, return early.
 	if virtualMachineScope.AzureStackHCIVirtualMachine.Status.FailureReason != nil || virtualMachineScope.AzureStackHCIVirtualMachine.Status.FailureMessage != nil {
@@ -154,7 +154,7 @@ func (r *AzureStackHCIVirtualMachineReconciler) reconcileNormal(ctx context.Cont
 		return reconcile.Result{}, err
 	}
 
-	ams := newAzureStackHCIVirtualMachineService(ctx, virtualMachineScope)
+	ams := newAzureStackHCIVirtualMachineService(virtualMachineScope)
 
 	// Get or create the virtual machine.
 	vm, err := r.getOrCreate(virtualMachineScope, ams)
@@ -246,12 +246,12 @@ func (r *AzureStackHCIVirtualMachineReconciler) getOrCreate(virtualMachineScope 
 	return vm, nil
 }
 
-func (r *AzureStackHCIVirtualMachineReconciler) reconcileDelete(ctx context.Context, virtualMachineScope *scope.VirtualMachineScope) (_ reconcile.Result, reterr error) {
+func (r *AzureStackHCIVirtualMachineReconciler) reconcileDelete(virtualMachineScope *scope.VirtualMachineScope) (_ reconcile.Result, reterr error) {
 	virtualMachineScope.Info("Handling deleted AzureStackHCIVirtualMachine", "Name", virtualMachineScope.Name())
 
 	conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, clusterv1.DeletingReason, clusterv1.ConditionSeverityInfo, "")
 
-	if err := newAzureStackHCIVirtualMachineService(ctx, virtualMachineScope).Delete(); err != nil {
+	if err := newAzureStackHCIVirtualMachineService(virtualMachineScope).Delete(); err != nil {
 		wrappedErr := errors.Wrapf(err, "error deleting AzureStackHCIVirtualMachine %s/%s", virtualMachineScope.Namespace(), virtualMachineScope.Name())
 		r.Recorder.Eventf(virtualMachineScope.AzureStackHCIVirtualMachine, corev1.EventTypeWarning, "FailureDeleteVM", wrappedErr.Error())
 		conditions.MarkFalse(virtualMachineScope.AzureStackHCIVirtualMachine, infrav1.VMRunningCondition, clusterv1.DeletionFailedReason, clusterv1.ConditionSeverityWarning, "%s", err.Error())
