@@ -25,6 +25,7 @@ import (
 	"github.com/microsoft/moc-sdk-for-go/services/network/virtualnetwork"
 	"github.com/microsoft/moc/pkg/auth"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -98,6 +99,15 @@ const (
 	// Deployment name and namespace for detecting azstackhci-operator presence
 	azstackhciOperatorDeploymentName      = "azstackhci-operator-controller-manager"
 	azstackhciOperatorDeploymentNamespace = "azstackhci-operator-system"
+
+	// ConfigMap used to determine environment type (22H2 vs Azure Local)
+	cloudOpProductInfoConfigMapName      = "cloudop-product-information"
+	cloudOpProductInfoConfigMapNamespace = "cloudop-system"
+	productInfoOfferKey                  = "offer"
+
+	// Known offer values from the product information ConfigMap
+	offer22H2       = "aks-hci-releases" // 22H2 environment — IPAM not supported
+	offerAzureLocal = "arcappliance"     // Azure Local (23H2+) — IPAM supported
 )
 
 // =============================================================================
@@ -548,6 +558,34 @@ func (s *IPAMService) IsIPAMSoleAllocator(ctx context.Context) bool {
 	// azstackhci-operator deployed → 2607 → keep MOC fallback
 	s.logger.Info(fmt.Sprintf("deployment found: %s", azstackhciOperatorDeploymentName))
 	return false
+}
+
+// IsIPAMSupported determines whether the current environment supports the IPAM operator.
+// It reads the "offer" field from the cloudop-product-information ConfigMap in the cloudop-system namespace.
+// Returns false for 22H2 environments (offer == "aks-hci-releases") where the IPAM operator is not deployed.
+// Returns true for Azure Local environments (offer == "arcappliance") and on any error (fail-open).
+func IsIPAMSupported(ctx context.Context, k8sClient client.Client) bool {
+	logger := logr.FromContextOrDiscard(ctx).WithName("IsIPAMSupported")
+
+	cm := &corev1.ConfigMap{}
+	key := types.NamespacedName{
+		Namespace: cloudOpProductInfoConfigMapNamespace,
+		Name:      cloudOpProductInfoConfigMapName,
+	}
+	if err := k8sClient.Get(ctx, key, cm); err != nil {
+		logger.Info("Failed to read product-information ConfigMap, assuming IPAM is supported (fail-open)", "error", err)
+		return true
+	}
+
+	offer, ok := cm.Data[productInfoOfferKey]
+	if !ok {
+		logger.Info("ConfigMap found but missing offer key, assuming IPAM is supported", "configmap", key)
+		return true
+	}
+
+	supported := offer != offer22H2
+	logger.Info("IPAM support check completed", "offer", offer, "supported", supported)
+	return supported
 }
 
 // =============================================================================
