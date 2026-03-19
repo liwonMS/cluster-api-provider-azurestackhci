@@ -657,7 +657,7 @@ func (s *IPAMService) createIPClaim(ctx context.Context, params ipClaimParams) e
 	}
 
 	// Set owner reference
-	if err := controllerutil.SetControllerReference(s.owner, claim, s.client.Scheme(), controllerutil.WithBlockOwnerDeletion(false)); err != nil {
+	if err := controllerutil.SetControllerReference(s.owner, claim, s.client.Scheme()); err != nil {
 		return fmt.Errorf("failed to set owner reference on IPClaim: %w", err)
 	}
 
