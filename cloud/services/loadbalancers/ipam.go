@@ -118,11 +118,13 @@ func (s *IPAMService) SyncLoadBalancerIP(ctx context.Context, mocGroup, lbName, 
 	claimName := generateLegacyLoadBalancerIPClaimName(s.clusterName)
 	lbAnnotations := map[string]string{
 		AnnotationLegacyLoadBalancerIP: "true",
-		ipam.AnnotationMocGroupName:    mocGroup,
-		ipam.AnnotationMocResourceName: lbName,
-		ipam.AnnotationMocResourceType: ipam.MocResourceTypeLoadBalancer,
 	}
-	return s.IPAMService.SyncIPClaim(ctx, claimName, mocAllocatedIP, lbAnnotations)
+	lbLabels := map[string]string{
+		ipam.LabelMocGroupName:    mocGroup,
+		ipam.LabelMocResourceName: lbName,
+		ipam.LabelMocResourceType: ipam.MocResourceTypeLoadBalancer,
+	}
+	return s.IPAMService.SyncIPClaim(ctx, claimName, mocAllocatedIP, lbAnnotations, lbLabels)
 }
 
 // DeleteLoadBalancerIPClaim deletes the legacy LB IP claim (used during cleanup).

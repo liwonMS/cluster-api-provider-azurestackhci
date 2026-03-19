@@ -52,17 +52,19 @@ const (
 	// 22H2 setup uses "clustergroup" as the management group name
 	ManagementGroup22H2 = "clustergroup"
 
+	// IPClaim labels
+	LabelCreatedBy = AzstackhciAPIGroup + "/created-by"
+
 	// IPClaim annotations
-	AnnotationIPClaimCreatedBy   = AzstackhciAPIGroup + "/created-by"
 	AnnotationIPClaimStaticIP    = "ipam." + AzstackhciAPIGroup + "/requested-ip"
 	AnnotationLogicalNetworkName = "ipam." + AzstackhciAPIGroup + "/logicalNetworkName"
 	AnnotationSubnetName         = "ipam." + AzstackhciAPIGroup + "/subnetName"
 	AnnotationAllocationSource   = AzstackhciAPIGroup + "/allocation-source"
 
-	// MOC resource annotations for tracking the underlying MOC resource associated with an IPClaim
-	AnnotationMocGroupName    = AzstackhciAPIGroup + "/moc-group-name"
-	AnnotationMocResourceName = AzstackhciAPIGroup + "/moc-resource-name"
-	AnnotationMocResourceType = AzstackhciAPIGroup + "/moc-resource-type"
+	// MOC resource labels for tracking the underlying MOC resource associated with an IPClaim
+	LabelMocGroupName    = AzstackhciAPIGroup + "/moc-group-name"
+	LabelMocResourceName = AzstackhciAPIGroup + "/moc-resource-name"
+	LabelMocResourceType = AzstackhciAPIGroup + "/moc-resource-type"
 
 	// MOC resource type values
 	MocResourceTypeNIC          = "nic"
@@ -304,10 +306,11 @@ func (s *IPAMService) isIPAMAllocationEnabled(ctx context.Context) (bool, error)
 
 // AllocateIP creates an IPAddressClaim and waits for the IPAM operator to allocate an IP address.
 // It first checks whether IPAM allocation is enabled for the configured VNet. If not, it returns
-// ("", nil) without error. The optional additionalAnnotations maps are merged into the claim's
-// annotations, allowing callers to attach MOC resource metadata (group, resource name, type).
+// ("", nil) without error. The optional additionalAnnotations map is merged into the claim's
+// annotations, and the optional additionalLabels maps are merged into the claim's labels,
+// allowing callers to attach MOC resource metadata (group, resource name, type).
 // Returns the allocated IP address on success.
-func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP string, additionalAnnotations ...map[string]string) (allocatedIP string, err error) {
+func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP string, additionalAnnotations map[string]string, additionalLabels map[string]string) (allocatedIP string, err error) {
 	logger := s.logger.WithValues("operation", "AllocateIP", "claimName", claimName)
 
 	enableIPAMAllocation, err := s.isIPAMAllocationEnabled(ctx)
@@ -320,7 +323,7 @@ func (s *IPAMService) AllocateIP(ctx context.Context, claimName string, staticIP
 		return "", nil
 	}
 
-	params := s.buildIPClaimParams(claimName, staticIP, AllocationSourceIPAM, additionalAnnotations...)
+	params := s.buildIPClaimParams(claimName, staticIP, AllocationSourceIPAM, additionalAnnotations, additionalLabels)
 
 	// Clean up the IPClaim on any error so the next reconcile starts fresh.
 	defer func() {
@@ -413,9 +416,9 @@ func (s *IPAMService) ensureIPClaimDeleted(ctx context.Context, claimName string
 // externally (e.g., by MOC IPAM). This is best-effort and non-blocking — it does not wait for
 // the IPAM operator to reconcile the claim. If an existing claim has a mismatched IP, it is
 // deleted and recreated with the correct IP. The claim is annotated with AllocationSourceMOC
-// to distinguish it from operator-allocated IPs. The optional additionalAnnotations maps are
-// merged into the claim's annotations.
-func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP string, additionalAnnotations ...map[string]string) error {
+// to distinguish it from operator-allocated IPs. The optional additionalLabels maps are
+// merged into the claim's labels.
+func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP string, additionalAnnotations map[string]string, additionalLabels map[string]string) error {
 	logger := s.logger.WithValues("operation", "SyncIPClaim", "claimName", claimName, "ip", allocatedIP, "vnetName", s.vnetName)
 
 	if allocatedIP == "" || isManagementResourceGroup(s.clusterResourceGroup) {
@@ -464,7 +467,7 @@ func (s *IPAMService) SyncIPClaim(ctx context.Context, claimName, allocatedIP st
 	// Just create, not waiting for completion
 	// Note: If an IPClaim already existed with a mismatched IP, it was deleted above and
 	// recreated here with AllocationSourceMOC, correctly reflecting that the final IP came from MOC.
-	params := s.buildIPClaimParams(claimName, allocatedIP, AllocationSourceMOC, additionalAnnotations...)
+	params := s.buildIPClaimParams(claimName, allocatedIP, AllocationSourceMOC, additionalAnnotations, additionalLabels)
 	if err := s.createIPClaim(ctx, params); err != nil {
 		s.telemetryWriter.WriteIPAMOperationLog(logger, OperationSync, claimName,
 			map[string]string{"allocatedIP": allocatedIP, "vnetName": s.vnetName}, err)
@@ -593,16 +596,24 @@ func IsIPAMSupported(ctx context.Context, k8sClient client.Client) bool {
 // =============================================================================
 
 // buildIPClaimParams assembles the parameters needed to create an IPAddressClaim, including
-// base annotations (created-by, allocation-source) merged with any additionalAnnotations.
-func (s *IPAMService) buildIPClaimParams(claimName, staticIP, allocationSource string, additionalAnnotations ...map[string]string) ipClaimParams {
-	annotations := map[string]string{
-		AnnotationIPClaimCreatedBy: s.creatorID,
+// base labels (created-by) and annotations (allocation-source) merged with any additional
+// labels and annotations provided by the caller.
+func (s *IPAMService) buildIPClaimParams(claimName, staticIP, allocationSource string, additionalAnnotations map[string]string, additionalLabels map[string]string) ipClaimParams {
+	labels := map[string]string{
+		LabelCreatedBy: s.creatorID,
 	}
+	if additionalLabels != nil {
+		for k, v := range additionalLabels {
+			labels[k] = v
+		}
+	}
+
+	annotations := map[string]string{}
 	if allocationSource != "" {
 		annotations[AnnotationAllocationSource] = allocationSource
 	}
-	for _, extra := range additionalAnnotations {
-		for k, v := range extra {
+	if additionalAnnotations != nil {
+		for k, v := range additionalAnnotations {
 			annotations[k] = v
 		}
 	}
@@ -613,6 +624,7 @@ func (s *IPAMService) buildIPClaimParams(claimName, staticIP, allocationSource s
 		ClusterName: s.clusterName,
 		VnetName:    s.vnetName,
 		StaticIP:    staticIP,
+		Labels:      labels,
 		Annotations: annotations,
 	}
 }
@@ -624,12 +636,13 @@ type ipClaimParams struct {
 	ClusterName string
 	VnetName    string
 	StaticIP    string
+	Labels      map[string]string
 	Annotations map[string]string
 }
 
 // createIPClaim creates an IPAddressClaim in the cluster from the given params. It sets
-// annotations for VNet/subnet name and static IP (if provided), and attaches an OwnerReference
-// to the service's owner object. If the claim already exists, it returns nil without error.
+// labels and annotations, and attaches an OwnerReference to the service's owner object.
+// If the claim already exists, it returns nil without error.
 func (s *IPAMService) createIPClaim(ctx context.Context, params ipClaimParams) error {
 	logger := s.logger.WithValues("ipClaim", params.Name, "namespace", params.Namespace)
 
@@ -649,6 +662,7 @@ func (s *IPAMService) createIPClaim(ctx context.Context, params ipClaimParams) e
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        params.Name,
 			Namespace:   params.Namespace,
+			Labels:      params.Labels,
 			Annotations: annotations,
 		},
 		Spec: ipamv1.IPAddressClaimSpec{

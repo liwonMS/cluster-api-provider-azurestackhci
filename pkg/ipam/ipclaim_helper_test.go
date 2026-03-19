@@ -324,48 +324,49 @@ var _ = Describe("buildIPClaimParams", func() {
 		svc = newTestIPAMService(newFakeClient())
 	})
 
-	It("sets base annotations with creator and allocation source", func() {
-		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceIPAM)
-		Expect(params.Annotations).To(HaveKeyWithValue(AnnotationIPClaimCreatedBy, IPClaimCreatorCAPH))
+	It("sets base labels with creator and annotation with allocation source", func() {
+		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceIPAM, nil, nil)
+		Expect(params.Labels).To(HaveKeyWithValue(LabelCreatedBy, IPClaimCreatorCAPH))
 		Expect(params.Annotations).To(HaveKeyWithValue(AnnotationAllocationSource, AllocationSourceIPAM))
 	})
 
 	It("skips allocation source annotation when empty", func() {
-		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", "")
+		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", "", nil, nil)
 		Expect(params.Annotations).NotTo(HaveKey(AnnotationAllocationSource))
 	})
 
-	It("merges additional annotations", func() {
+	It("merges additional labels", func() {
 		extra := map[string]string{
-			AnnotationMocGroupName:    "my-group",
-			AnnotationMocResourceName: "my-nic",
-			AnnotationMocResourceType: MocResourceTypeNIC,
+			LabelMocGroupName:    "my-group",
+			LabelMocResourceName: "my-nic",
+			LabelMocResourceType: MocResourceTypeNIC,
 		}
-		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceMOC, extra)
-		Expect(params.Annotations).To(HaveKeyWithValue(AnnotationMocGroupName, "my-group"))
-		Expect(params.Annotations).To(HaveKeyWithValue(AnnotationMocResourceName, "my-nic"))
-		Expect(params.Annotations).To(HaveKeyWithValue(AnnotationMocResourceType, MocResourceTypeNIC))
+		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceMOC, nil, extra)
+		Expect(params.Labels).To(HaveKeyWithValue(LabelMocGroupName, "my-group"))
+		Expect(params.Labels).To(HaveKeyWithValue(LabelMocResourceName, "my-nic"))
+		Expect(params.Labels).To(HaveKeyWithValue(LabelMocResourceType, MocResourceTypeNIC))
+		// Base labels still present
+		Expect(params.Labels).To(HaveKeyWithValue(LabelCreatedBy, IPClaimCreatorCAPH))
+	})
+
+	It("merges additional annotations", func() {
+		extraAnnotations := map[string]string{
+			"custom-annotation": "custom-value",
+		}
+		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceMOC, extraAnnotations, nil)
+		Expect(params.Annotations).To(HaveKeyWithValue("custom-annotation", "custom-value"))
 		// Base annotations still present
-		Expect(params.Annotations).To(HaveKeyWithValue(AnnotationIPClaimCreatedBy, IPClaimCreatorCAPH))
+		Expect(params.Annotations).To(HaveKeyWithValue(AnnotationAllocationSource, AllocationSourceMOC))
 	})
 
-	It("merges multiple additional annotation maps", func() {
-		extra1 := map[string]string{"key1": "val1"}
-		extra2 := map[string]string{"key2": "val2"}
-		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceIPAM, extra1, extra2)
-		Expect(params.Annotations).To(HaveKeyWithValue("key1", "val1"))
-		Expect(params.Annotations).To(HaveKeyWithValue("key2", "val2"))
-	})
-
-	It("later annotation maps override earlier ones", func() {
-		extra1 := map[string]string{"key": "first"}
-		extra2 := map[string]string{"key": "second"}
-		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceIPAM, extra1, extra2)
-		Expect(params.Annotations).To(HaveKeyWithValue("key", "second"))
+	It("handles nil additional annotations", func() {
+		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceIPAM, nil, nil)
+		Expect(params.Annotations).To(HaveKeyWithValue(AnnotationAllocationSource, AllocationSourceIPAM))
+		Expect(params.Annotations).To(HaveLen(1))
 	})
 
 	It("sets core fields correctly", func() {
-		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceIPAM)
+		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceIPAM, nil, nil)
 		Expect(params.Name).To(Equal("claim-1"))
 		Expect(params.Namespace).To(Equal(IPClaimNamespace))
 		Expect(params.ClusterName).To(Equal("test-cluster"))
@@ -383,7 +384,7 @@ var _ = Describe("createIPClaim", func() {
 		fakeClient := newFakeClient()
 		svc := newTestIPAMService(fakeClient)
 
-		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceIPAM)
+		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceIPAM, nil, nil)
 		err := svc.createIPClaim(context.Background(), params)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -394,7 +395,7 @@ var _ = Describe("createIPClaim", func() {
 		Expect(claim.Annotations).To(HaveKeyWithValue(AnnotationIPClaimStaticIP, "10.0.0.5"))
 		Expect(claim.Annotations).To(HaveKeyWithValue(AnnotationLogicalNetworkName, "test-vnet"))
 		Expect(claim.Annotations).To(HaveKeyWithValue(AnnotationSubnetName, "test-vnet"))
-		Expect(claim.Annotations).To(HaveKeyWithValue(AnnotationIPClaimCreatedBy, IPClaimCreatorCAPH))
+		Expect(claim.Labels).To(HaveKeyWithValue(LabelCreatedBy, IPClaimCreatorCAPH))
 		Expect(claim.Annotations).To(HaveKeyWithValue(AnnotationAllocationSource, AllocationSourceIPAM))
 	})
 
@@ -402,7 +403,7 @@ var _ = Describe("createIPClaim", func() {
 		fakeClient := newFakeClient()
 		svc := newTestIPAMService(fakeClient)
 
-		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceIPAM)
+		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceIPAM, nil, nil)
 		err := svc.createIPClaim(context.Background(), params)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -416,7 +417,7 @@ var _ = Describe("createIPClaim", func() {
 		fakeClient := newFakeClient()
 		svc := newTestIPAMService(fakeClient)
 
-		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceIPAM)
+		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceIPAM, nil, nil)
 		err := svc.createIPClaim(context.Background(), params)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -430,7 +431,7 @@ var _ = Describe("createIPClaim", func() {
 		fakeClient := newFakeClient()
 		svc := newTestIPAMService(fakeClient)
 
-		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceIPAM)
+		params := svc.buildIPClaimParams("claim-1", "", AllocationSourceIPAM, nil, nil)
 		err := svc.createIPClaim(context.Background(), params)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -451,9 +452,43 @@ var _ = Describe("createIPClaim", func() {
 		fakeClient := newFakeClient(existingClaim)
 		svc := newTestIPAMService(fakeClient)
 
-		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceIPAM)
+		params := svc.buildIPClaimParams("claim-1", "10.0.0.5", AllocationSourceIPAM, nil, nil)
 		err := svc.createIPClaim(context.Background(), params)
 		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("places additional annotations on annotations and additional labels on labels", func() {
+		fakeClient := newFakeClient()
+		svc := newTestIPAMService(fakeClient)
+
+		lbAnnotations := map[string]string{
+			"ipam.azstackhci.com/legacy-loadbalancer-ip": "true",
+		}
+		lbLabels := map[string]string{
+			LabelMocGroupName:    "my-group",
+			LabelMocResourceName: "my-lb",
+			LabelMocResourceType: MocResourceTypeLoadBalancer,
+		}
+		params := svc.buildIPClaimParams("claim-lb", "10.0.0.10", AllocationSourceMOC, lbAnnotations, lbLabels)
+		err := svc.createIPClaim(context.Background(), params)
+		Expect(err).NotTo(HaveOccurred())
+
+		claim := &ipamv1.IPAddressClaim{}
+		err = fakeClient.Get(context.Background(), client.ObjectKey{Name: "claim-lb", Namespace: IPClaimNamespace}, claim)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Verify legacy LB IP is in annotations, not labels
+		Expect(claim.Annotations).To(HaveKeyWithValue("ipam.azstackhci.com/legacy-loadbalancer-ip", "true"))
+		Expect(claim.Labels).NotTo(HaveKey("ipam.azstackhci.com/legacy-loadbalancer-ip"))
+
+		// Verify MOC metadata is in labels
+		Expect(claim.Labels).To(HaveKeyWithValue(LabelMocGroupName, "my-group"))
+		Expect(claim.Labels).To(HaveKeyWithValue(LabelMocResourceName, "my-lb"))
+		Expect(claim.Labels).To(HaveKeyWithValue(LabelMocResourceType, MocResourceTypeLoadBalancer))
+
+		// Verify base annotations still present
+		Expect(claim.Annotations).To(HaveKeyWithValue(AnnotationAllocationSource, AllocationSourceMOC))
+		Expect(claim.Annotations).To(HaveKeyWithValue(AnnotationIPClaimStaticIP, "10.0.0.10"))
 	})
 })
 
@@ -777,7 +812,7 @@ var _ = Describe("SyncIPClaim", func() {
 		fakeClient := newFakeClient()
 		svc := newTestIPAMService(fakeClient)
 
-		err := svc.SyncIPClaim(context.Background(), "claim-1", "")
+		err := svc.SyncIPClaim(context.Background(), "claim-1", "", nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -787,7 +822,7 @@ var _ = Describe("SyncIPClaim", func() {
 			c.ClusterResourceGroup = ManagementGroupArcAppliance
 		})
 
-		err := svc.SyncIPClaim(context.Background(), "claim-1", "10.0.0.5")
+		err := svc.SyncIPClaim(context.Background(), "claim-1", "10.0.0.5", nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -797,7 +832,7 @@ var _ = Describe("SyncIPClaim", func() {
 			c.ClusterResourceGroup = ManagementGroup22H2
 		})
 
-		err := svc.SyncIPClaim(context.Background(), "claim-1", "10.0.0.5")
+		err := svc.SyncIPClaim(context.Background(), "claim-1", "10.0.0.5", nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -825,7 +860,7 @@ var _ = Describe("SyncIPClaim", func() {
 		fakeClient := newFakeClient(existingClaim, ipAddr)
 		svc := newTestIPAMService(fakeClient)
 
-		err := svc.SyncIPClaim(context.Background(), "claim-1", "10.0.0.5")
+		err := svc.SyncIPClaim(context.Background(), "claim-1", "10.0.0.5", nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Verify the claim was NOT deleted (still exists)
@@ -862,7 +897,7 @@ var _ = Describe("SyncIPClaim", func() {
 			c.CloudFqdn = ""
 		})
 
-		err := svc.SyncIPClaim(context.Background(), "claim-1", "10.0.0.5")
+		err := svc.SyncIPClaim(context.Background(), "claim-1", "10.0.0.5", nil, nil)
 		// Expect error from isIPAMAllocationEnabled (no MOC config), but the delete should have happened
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("MOC connection not configured"))
@@ -889,7 +924,7 @@ var _ = Describe("SyncIPClaim", func() {
 			c.CloudFqdn = ""
 		})
 
-		err := svc.SyncIPClaim(context.Background(), "claim-1", "10.0.0.5")
+		err := svc.SyncIPClaim(context.Background(), "claim-1", "10.0.0.5", nil, nil)
 		// Errors at isIPAMAllocationEnabled, but the old claim should be deleted first
 		Expect(err).To(HaveOccurred())
 
@@ -908,7 +943,7 @@ var _ = Describe("SyncIPClaim", func() {
 			c.CloudFqdn = ""
 		})
 
-		err := svc.SyncIPClaim(context.Background(), "claim-1", "10.0.0.5")
+		err := svc.SyncIPClaim(context.Background(), "claim-1", "10.0.0.5", nil, nil)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("MOC connection not configured"))
 	})
@@ -935,7 +970,7 @@ var _ = Describe("SyncIPClaim", func() {
 		})
 
 		// verifyAllocatedIP fails (IPAddress not found) → delete → then isIPAMAllocationEnabled errors
-		err := svc.SyncIPClaim(context.Background(), "claim-1", "10.0.0.5")
+		err := svc.SyncIPClaim(context.Background(), "claim-1", "10.0.0.5", nil, nil)
 		Expect(err).To(HaveOccurred())
 	})
 
@@ -951,7 +986,7 @@ var _ = Describe("SyncIPClaim", func() {
 		fakeClient := newFakeClient(existingClaim)
 		svc := newTestIPAMService(fakeClient)
 
-		err := svc.SyncIPClaim(context.Background(), "claim-1", "")
+		err := svc.SyncIPClaim(context.Background(), "claim-1", "", nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Claim should still exist — SyncIPClaim bailed before touching it
