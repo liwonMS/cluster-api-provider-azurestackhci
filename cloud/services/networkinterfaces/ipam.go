@@ -119,7 +119,7 @@ func (s *IPAMService) AllocateNicIPClaim(ctx context.Context, mocGroup string, m
 		claimName := ipam.GenerateNICIPClaimName(*mocNic.Name, index)
 		if allocatedIP, err := s.AllocateIP(ctx, claimName, staticIPAddress, nil, mocLabels); err != nil {
 			errs = multierr.Append(errs, err)
-		} else {
+		} else if allocatedIP != "" {
 			(*mocNic.IPConfigurations)[index].InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress = to.StringPtr(allocatedIP)
 		}
 	}

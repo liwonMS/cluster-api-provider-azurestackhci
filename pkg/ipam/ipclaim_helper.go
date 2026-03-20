@@ -694,15 +694,12 @@ func (s *IPAMService) waitForIPAllocation(ctx context.Context, claimName string)
 	logger := s.logger.WithValues("ipClaim", claimName)
 	logger.Info("Waiting for IP allocation from IPClaim")
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, IPClaimTimeout)
-	defer cancel()
-
 	namespacedName := types.NamespacedName{Name: claimName, Namespace: s.namespace}
 
 	var allocatedIP string
 	var lastError string // Track the last issue for better error reporting
 
-	pollErr := wait.PollUntilContextTimeout(timeoutCtx, IPClaimPollInterval, IPClaimTimeout, true, func(ctx context.Context) (bool, error) {
+	pollErr := wait.PollUntilContextTimeout(ctx, IPClaimPollInterval, IPClaimTimeout, true, func(ctx context.Context) (bool, error) {
 		claim := &ipamv1.IPAddressClaim{}
 		if err := s.client.Get(ctx, namespacedName, claim); err != nil {
 			// If not found, the cache may not have synced yet after create - keep polling
