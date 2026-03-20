@@ -157,11 +157,17 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 	telemetry.WriteMocOperationLog(s.Scope.GetLogger(), telemetry.CreateOrUpdate, s.Scope.GetCustomResourceTypeWithName(), telemetry.NetworkInterface,
 		telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), nicSpec.Name), &networkInterface, err)
 	if err != nil {
-		if s.shouldRetryIfIPConflict(ctx, err, nicSpec) {
+		if isIPConflictError(err) && s.shouldRetryIfIPConflict(ctx, nicSpec) {
 			if createdNic, err = s.handleIPAddressConflictRetry(ctx, nicSpec, &networkInterface); err != nil {
 				return errors.Wrapf(err, "failed to retry create with network interface %s in resource group %s", nicSpec.Name, s.Scope.GetResourceGroup())
 			}
 		} else {
+			// Clean up IPAM allocation on non-conflict failure to avoid leaking reserved IPs
+			if s.IPAMService != nil {
+				if delErr := s.IPAMService.DeleteNicIPClaim(ctx, nicSpec); delErr != nil {
+					logger.Error(delErr, "Failed to clean up IPClaim after NIC creation failure")
+				}
+			}
 			return errors.Wrapf(err, "failed to create network interface %s in resource group %s", nicSpec.Name, s.Scope.GetResourceGroup())
 		}
 	}
@@ -177,24 +183,23 @@ func (s *Service) Reconcile(ctx context.Context, spec interface{}) error {
 	return nil
 }
 
+// isIPConflictError checks if the error indicates an IP address conflict.
+func isIPConflictError(err error) bool {
+	return mocerrors.IsInUse(err) || mocerrors.IsAlreadySet(err)
+}
+
 // shouldRetryIfIPConflict determines whether a NIC creation failure due to an IP address conflict
 // should trigger a retry with MOC auto-allocation. This handles an edge case where a race condition
 // between IPAM state and MOC state causes the IPAM-assigned IP to already be in use in MOC. The retry path clears the IPAM IP and
 // recreates the NIC with an empty PrivateIPAddress, letting MOC auto-allocate a non-conflicting IP.
 //
 // Returns false (no retry) when:
-//   - There is no error, or the user specified a static IP (not managed by IPAM).
+//   - The user specified a static IP (not managed by IPAM).
 //   - IPAM is the sole allocator (azlocal-overlay scenario): MOC fallback is not available, so
 //     retrying with MOC auto-allocation is not an option. The error propagates and the reconciler
 //     will retry the full IPAM allocation flow. IPClaims are cleaned up on cluster deletion.
-//   - The error is not an IP conflict (AlreadySet) error.
-func (s *Service) shouldRetryIfIPConflict(ctx context.Context, err error, nicSpec *Spec) bool {
-	if err == nil || nicSpec.StaticIPAddress != "" {
-		return false
-	}
-
-	// Check for the specific error pattern indicating IP address conflict first (cheap check)
-	if !mocerrors.IsAlreadySet(err) {
+func (s *Service) shouldRetryIfIPConflict(ctx context.Context, nicSpec *Spec) bool {
+	if nicSpec.StaticIPAddress != "" {
 		return false
 	}
 
