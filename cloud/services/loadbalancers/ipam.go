@@ -29,7 +29,7 @@ import (
 )
 
 // Annotation for marking LoadBalancer IP claims
-const AnnotationLegacyLoadBalancerIP = "ipam." + ipam.AzstackhciAPIGroup + "/legacy-loadbalancer-ip"
+const AnnotationLegacyLoadBalancerIP = ipam.AzstackhciAPIGroup + "/legacy-loadbalancer-ip"
 
 // CAPHTelemetryWriter implements ipam.IPAMTelemetryWriter for CAPH LoadBalancer.
 type CAPHTelemetryWriter struct {

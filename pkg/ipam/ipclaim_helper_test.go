@@ -462,8 +462,9 @@ var _ = Describe("createIPClaim", func() {
 		fakeClient := newFakeClient()
 		svc := newTestIPAMService(fakeClient)
 
+		lbAnnotation := AzstackhciAPIGroup + "/legacy-loadbalancer-ip"
 		lbAnnotations := map[string]string{
-			"ipam.azstackhci.com/legacy-loadbalancer-ip": "true",
+			lbAnnotation: "true",
 		}
 		lbLabels := map[string]string{
 			LabelMocGroupName:    "my-group",
@@ -479,8 +480,8 @@ var _ = Describe("createIPClaim", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Verify legacy LB IP is in annotations, not labels
-		Expect(claim.Annotations).To(HaveKeyWithValue("ipam.azstackhci.com/legacy-loadbalancer-ip", "true"))
-		Expect(claim.Labels).NotTo(HaveKey("ipam.azstackhci.com/legacy-loadbalancer-ip"))
+		Expect(claim.Annotations).To(HaveKeyWithValue(lbAnnotation, "true"))
+		Expect(claim.Labels).NotTo(HaveKey(lbAnnotation))
 
 		// Verify MOC metadata is in labels
 		Expect(claim.Labels).To(HaveKeyWithValue(LabelMocGroupName, "my-group"))
