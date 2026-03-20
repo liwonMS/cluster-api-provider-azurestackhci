@@ -165,26 +165,22 @@ func (s *Service) Delete(ctx context.Context, spec interface{}) error {
 	logger := s.Scope.GetLogger()
 	logger.Info("deleting loadbalancer", "name", lbSpec.Name)
 
-	// Delete IPAM claim after LB deletion (best-effort, non-blocking)
-	defer func() {
-		if s.IPAMService != nil {
-			if err := s.IPAMService.DeleteLoadBalancerIPClaim(ctx); err != nil {
-				logger.Info("Failed to delete LoadBalancer IPClaim", "error", err)
-			}
-		}
-	}()
-
 	err := s.Client.Delete(ctx, s.Scope.GetResourceGroup(), lbSpec.Name)
 	telemetry.WriteMocOperationLog(logger, telemetry.Delete, s.Scope.GetCustomResourceTypeWithName(), telemetry.LoadBalancer,
 		telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), lbSpec.Name), nil, err)
 	if err != nil && azurestackhci.ResourceNotFound(err) {
 		// already deleted
-		return nil
-	}
-	if err != nil {
+	} else if err != nil {
 		return errors.Wrapf(err, "failed to delete loadbalancer %s in resource group %s", lbSpec.Name, s.Scope.GetResourceGroup())
 	}
 
+	// Delete IPAM claim only after MOC resource is confirmed deleted
+	if s.IPAMService != nil {
+		if err := s.IPAMService.DeleteLoadBalancerIPClaim(ctx); err != nil {
+			logger.Info("Failed to delete LoadBalancer IPClaim", "error", err)
+		}
+	}
+
 	logger.Info("successfully deleted loadbalancer", "name", lbSpec.Name)
-	return err
+	return nil
 }

@@ -251,21 +251,23 @@ func (s *Service) Delete(ctx context.Context, spec interface{}) error {
 	}
 	logger := s.Scope.GetLogger()
 	logger.Info("deleting nic", "name", nicSpec.Name)
-	defer func() {
-		if s.IPAMService != nil {
-			if err := s.IPAMService.DeleteNicIPClaim(ctx, nicSpec); err != nil {
-				logger.Error(err, "failed to delete IPAM claim for nic", "name", nicSpec.Name)
-			}
-		}
-	}()
 
 	err := s.Client.Delete(ctx, s.Scope.GetResourceGroup(), nicSpec.Name)
 	telemetry.WriteMocOperationLog(logger, telemetry.Delete, s.Scope.GetCustomResourceTypeWithName(), telemetry.NetworkInterface,
 		telemetry.GenerateMocResourceName(s.Scope.GetResourceGroup(), nicSpec.Name), nil, err)
-	if err != nil {
+	if err != nil && azurestackhci.ResourceNotFound(err) {
+		// already deleted
+	} else if err != nil {
 		return errors.Wrapf(err, "failed to delete network interface %s in resource group %s", nicSpec.Name, s.Scope.GetResourceGroup())
 	}
 
+	// Delete IPAM claim only after MOC resource is confirmed deleted
+	if s.IPAMService != nil {
+		if err := s.IPAMService.DeleteNicIPClaim(ctx, nicSpec); err != nil {
+			logger.Error(err, "failed to delete IPAM claim for nic", "name", nicSpec.Name)
+		}
+	}
+
 	logger.Info("successfully deleted nic", "name", nicSpec.Name)
-	return err
+	return nil
 }
