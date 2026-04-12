@@ -610,7 +610,7 @@ var _ = Describe("verifyAllocatedIP", func() {
 		Expect(err.Error()).To(ContainSubstring("got 10.0.0.99"))
 	})
 
-	It("returns error when claim has no address ref", func() {
+	It("returns nil when claim has no address ref (pending allocation)", func() {
 		fakeClient := newFakeClient()
 		svc := newTestIPAMService(fakeClient)
 
@@ -622,8 +622,7 @@ var _ = Describe("verifyAllocatedIP", func() {
 		}
 
 		err := svc.verifyAllocatedIP(context.Background(), claim, "10.0.0.5")
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("no allocated address"))
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("returns error when IPAddress object does not exist", func() {
@@ -912,7 +911,7 @@ var _ = Describe("SyncIPClaim", func() {
 
 	// --- Existing claim with no addressRef (pending allocation) ---
 
-	It("treats claim with no addressRef as mismatched and deletes it", func() {
+	It("treats claim with no addressRef as pending and does not delete it", func() {
 		existingClaim := &ipamv1.IPAddressClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "claim-1",
@@ -927,13 +926,13 @@ var _ = Describe("SyncIPClaim", func() {
 		})
 
 		err := svc.SyncIPClaim(context.Background(), "claim-1", "10.0.0.5", nil, nil)
-		// Errors at isIPAMAllocationEnabled, but the old claim should be deleted first
-		Expect(err).To(HaveOccurred())
+		// No error — pending claim is left alone
+		Expect(err).NotTo(HaveOccurred())
 
-		// Verify the pending claim was deleted
+		// Verify the pending claim still exists
 		claim := &ipamv1.IPAddressClaim{}
 		getErr := fakeClient.Get(context.Background(), client.ObjectKey{Name: "claim-1", Namespace: IPClaimNamespace}, claim)
-		Expect(getErr).To(HaveOccurred())
+		Expect(getErr).NotTo(HaveOccurred())
 	})
 
 	// --- Claim does not exist ---

@@ -488,7 +488,9 @@ func (s *IPAMService) verifyAllocatedIP(ctx context.Context, claim *ipamv1.IPAdd
 	defer cancel()
 
 	if claim.Status.AddressRef.Name == "" {
-		return fmt.Errorf("IPClaim has no allocated address")
+		// IPClaim exists but hasn't been allocated yet — don't treat as mismatch
+		s.logger.Info("IPClaim has no allocated address yet, waiting for IPAM controller", "claimName", claim.Name)
+		return nil
 	}
 
 	ipAddr := &ipamv1.IPAddress{}
